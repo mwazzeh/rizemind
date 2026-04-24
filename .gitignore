@@ -1,5 +1,4 @@
 data
-.env
 dist/
 **/*.egg-info
 # Ignore virtual environment
@@ -22,3 +21,58 @@ poetry.lock
 **/.swp
 
 **/*.csv
+
+# Generated analysis/profiling output
+**/split_analysis.png
+
+# ── Environment & secrets ─────────────────────────────────────────────────────
+.env
+.env.*
+*.env
+env.local
+.env.local
+.env.*.local
+secrets/
+secrets.toml
+secrets.yaml
+secrets.json
+*secret*
+*secrets*
+*credential*
+*credentials*
+*password*
+*passwd*
+
+# ── Cryptographic keys & certificates ────────────────────────────────────────
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.cer
+*.der
+*.jks
+*.keystore
+id_rsa
+id_rsa.*
+id_ed25519
+id_ed25519.*
+id_ecdsa
+id_ecdsa.*
+*.gpg
+*.asc
+
+# ── API tokens & config with embedded credentials ────────────────────────────
+*api_key*
+*api-key*
+*apikey*
+*access_token*
+*auth_token*
+.netrc
+.npmrc
+.pypirc
+gcloud_credentials*.json
+service_account*.json
+*serviceaccount*.json
+firebase*.json
+application_default_credentials.json
