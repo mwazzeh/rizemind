@@ -22,3 +22,6 @@ poetry.lock
 **/.swp
 
 **/*.csv
+
+# Generated analysis/profiling output
+**/split_analysis.png
