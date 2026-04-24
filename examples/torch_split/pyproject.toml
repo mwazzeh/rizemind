@@ -1,0 +1,60 @@
+[project]
+name = "torch-split"
+version = "0.1.0"
+description = "Split learning example on MNIST using SplitLearningStrategy with Flower"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "flwr[simulation]>=1.18.0",
+    "flwr-datasets[vision]>=0.5.0",
+    "torch>=2.6.0",
+    "torchvision>=0.21.0",
+    "rizemind",
+    "matplotlib>=3.9",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["."]
+
+[tool.flwr.app]
+publisher = "trizelabs"
+
+[tool.flwr.app.components]
+serverapp = "torch_split.server:app"
+clientapp = "torch_split.client:app"
+
+[tool.flwr.app.config]
+# num-server-rounds counts actual Flower rounds.
+# Split learning consumes 2 Flower rounds per training step.
+# 10 rounds = 5 SL steps = 5 MNIST mini-batches per client.
+num-server-rounds = 10
+target-epochs = 0.0    # when > 0, overrides num-server-rounds using max local train batches
+min-available-clients = 2
+batch-size = 32
+learning-rate = 0.01
+val-ratio = 0.10
+partitioner = "iid"    # {"iid", "dirichlet"}
+partition-seed = 42
+dirichlet-alpha = 0.5
+dirichlet-min-partition-size = 10
+dirichlet-self-balancing = false
+
+# Split-learning specific
+cut-layer = 0          # last client-side layer index (0-indexed)
+input-dim = 784        # flattened MNIST: 28x28 = 784
+hidden-dim = 128       # activation dimension at the cut point
+num-classes = 10       # MNIST has 10 digit classes
+
+# Demo mode: set to true for step-by-step logging of each forward/backward round.
+# Override on the command line:  flwr run . --run-config 'demo=true'
+demo = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.flwr.federations]
+default = "local-simulation"
+
+[tool.flwr.federations.local-simulation]
+options.num-supernodes = 2
