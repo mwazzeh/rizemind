@@ -1,23 +1,31 @@
-"""Model definition and data utilities for the torch_split example.
+"""Model definitions and data utilities for the torch_split example.
 
-The model is split at a single cut layer:
+Two datasets / architectures are supported, selected by ``dataset``:
 
-    Input (flattened 28x28) → [ClientHead: Linear(784→H) + ReLU]
-                             → activations (H,)
-                             → [ServerTail: Linear(H→10)]
-                             → logits → loss
+- ``"mnist"`` — single-channel 28x28 images flattened to 784 dims, trained
+  with a 2-layer MLP split at the hidden layer::
 
-Dataset: MNIST via Flower Datasets (ylecun/mnist).  Clients can use either IID
-or Dirichlet non-IID partitions of the training set.  Images are flattened to a
-784-dim vector so the architecture stays a simple MLP and the split-learning
-contract (one activation tensor per step) is unchanged.
+      Input (784,) → [ClientHead: Linear(784→H) + ReLU]
+                    → activations (H,)
+                    → [ServerTail: Linear(H→10)] → logits → loss
+
+- ``"cifar10"`` — 3x32x32 images kept as CHW tensors, trained with a small
+  CNN split after two conv+pool blocks::
+
+      Input (3,32,32) → [ConvClientHead: Conv→ReLU→Pool→Conv→ReLU→Pool]
+                       → activations (64,8,8)
+                       → [ConvServerTail: Flatten→Linear→ReLU→Linear] → logits
+
+In both cases the split-learning contract is unchanged: the client sends a
+single activation tensor (plus the batch labels) to the server each forward
+round.
 
 Label forwarding convention
 ---------------------------
 During the forward round the client packs the batch labels as a second
 ndarray alongside the activations:
 
-    parameters.tensors[0]  - activation float32 array, shape (B, hidden_dim)
+    parameters.tensors[0]  - activation float32 array, shape (B, *act_dims)
     parameters.tensors[1]  - label int64 array,         shape (B,)
 
 ``extract_activation_and_labels`` unpacks this on the server side.
@@ -43,13 +51,96 @@ from torch.utils.data import DataLoader, Dataset
 from torchvision.transforms import Compose, Normalize, ToTensor
 
 # ---------------------------------------------------------------------------
+# Dataset registry
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class DatasetSpec:
+    """Static description of a supported dataset and its architecture.
+
+    Attributes:
+        name: Short key (``"mnist"`` or ``"cifar10"``).
+        hf_path: Hugging Face dataset path used by Flower Datasets.
+        image_key: Column holding the image in the raw dataset.
+        num_classes: Number of label classes.
+        arch: ``"mlp"`` (flatten + linear) or ``"cnn"`` (keep CHW + conv).
+        in_channels: Image channel count.
+        image_hw: Image height/width (square images assumed).
+        norm_mean: Per-channel normalization mean.
+        norm_std: Per-channel normalization std.
+    """
+
+    name: str
+    hf_path: str
+    image_key: str
+    num_classes: int
+    arch: str
+    in_channels: int
+    image_hw: int
+    norm_mean: tuple[float, ...]
+    norm_std: tuple[float, ...]
+
+    @property
+    def input_dim(self) -> int:
+        """Flattened input size (used by the MLP architecture)."""
+        return self.in_channels * self.image_hw * self.image_hw
+
+
+_DATASETS: dict[str, DatasetSpec] = {
+    "mnist": DatasetSpec(
+        name="mnist",
+        hf_path="ylecun/mnist",
+        image_key="image",
+        num_classes=10,
+        arch="mlp",
+        in_channels=1,
+        image_hw=28,
+        norm_mean=(0.1307,),
+        norm_std=(0.3081,),
+    ),
+    "cifar10": DatasetSpec(
+        name="cifar10",
+        hf_path="uoft-cs/cifar10",
+        image_key="img",
+        num_classes=10,
+        arch="cnn",
+        in_channels=3,
+        image_hw=32,
+        norm_mean=(0.4914, 0.4822, 0.4465),
+        norm_std=(0.2470, 0.2435, 0.2616),
+    ),
+}
+
+
+def get_dataset_spec(name: str) -> DatasetSpec:
+    """Return the :class:`DatasetSpec` for ``name``.
+
+    Args:
+        name: Dataset key, case-insensitive (``"mnist"`` or ``"cifar10"``).
+
+    Returns:
+        The matching dataset specification.
+
+    Raises:
+        ValueError: If ``name`` is not a supported dataset.
+    """
+    key = name.strip().lower()
+    if key not in _DATASETS:
+        raise ValueError(
+            f"dataset must be one of {sorted(_DATASETS)}, got {name!r}"
+        )
+    return _DATASETS[key]
+
+
+# ---------------------------------------------------------------------------
 # Partitioner config
 # ---------------------------------------------------------------------------
 
 
 @dataclass(frozen=True)
 class PartitionConfig:
-    """Configuration for MNIST train partitioning in the torch_split example."""
+    """Configuration for train partitioning in the torch_split example."""
 
     kind: str = "iid"
     seed: int = 42
@@ -93,7 +184,7 @@ def partition_config_from_run_config(
 # Singleton FederatedDataset (cached across client_fn calls within a process)
 # ---------------------------------------------------------------------------
 
-_fds_cache: dict[tuple[int, PartitionConfig], FederatedDataset] = {}
+_fds_cache: dict[tuple[str, int, PartitionConfig], FederatedDataset] = {}
 
 
 def _make_train_partitioner(
@@ -114,13 +205,14 @@ def _make_train_partitioner(
 
 
 def _get_fds(
+    spec: DatasetSpec,
     num_partitions: int,
     partition_config: PartitionConfig,
 ) -> FederatedDataset:
-    cache_key = (num_partitions, partition_config)
+    cache_key = (spec.name, num_partitions, partition_config)
     if cache_key not in _fds_cache:
         _fds_cache[cache_key] = FederatedDataset(
-            dataset="ylecun/mnist",
+            dataset=spec.hf_path,
             partitioners={
                 "train": _make_train_partitioner(
                     num_partitions=num_partitions,
@@ -135,19 +227,35 @@ def _get_fds(
 # Transforms
 # ---------------------------------------------------------------------------
 
-# MNIST: single channel 28x28, normalised to roughly [-1, 1].
-# Flatten is applied inside the transform so that ClientHead can be a plain
-# Linear without any CNN layers.
-_MNIST_TRANSFORMS = Compose([
-    ToTensor(),
-    Normalize((0.1307,), (0.3081,)),
-    lambda t: t.view(-1),   # (1, 28, 28) → (784,)
-])
+
+def _build_transform(spec: DatasetSpec):
+    """Return the image transform for ``spec``.
+
+    MLP datasets flatten to a 1-D vector; CNN datasets keep CHW layout.
+    """
+    steps: list = [ToTensor(), Normalize(spec.norm_mean, spec.norm_std)]
+    if spec.arch == "mlp":
+        steps.append(lambda t: t.view(-1))
+    return Compose(steps)
 
 
-def _apply_transforms(batch: dict) -> dict:
-    batch["image"] = [_MNIST_TRANSFORMS(img) for img in batch["image"]]
-    return batch
+def _make_apply_transforms(spec: DatasetSpec):
+    """Return a batch transform that writes the tensor under ``"image"``.
+
+    The raw source column is dropped when it is not already ``"image"`` so a
+    plain ``DataLoader`` over the transformed split does not try to collate the
+    original PIL images.
+    """
+    transform = _build_transform(spec)
+
+    def _apply(batch: dict) -> dict:
+        images = [transform(img) for img in batch[spec.image_key]]
+        if spec.image_key != "image":
+            del batch[spec.image_key]
+        batch["image"] = images
+        return batch
+
+    return _apply
 
 
 # ---------------------------------------------------------------------------
@@ -214,11 +322,11 @@ class CachedTrainPartition:
 
 
 _partition_cache: dict[
-    tuple[int, int, int, float, PartitionConfig],
+    tuple[str, int, int, int, float, int, PartitionConfig],
     tuple[CachedTrainPartition, TensorDictDataset],
 ] = {}
 _train_batch_count_cache: dict[
-    tuple[int, int, float, PartitionConfig],
+    tuple[str, int, int, float, int, PartitionConfig],
     tuple[int, ...],
 ] = {}
 
@@ -240,6 +348,33 @@ def _materialize_split(split: Dataset) -> tuple[torch.Tensor, torch.Tensor]:
     return torch.stack(images), torch.tensor(labels, dtype=torch.long)
 
 
+def _capped_size(n: int, max_train_samples: int | None) -> int:
+    """Return ``min(n, max_train_samples)`` treating non-positive caps as off."""
+    if max_train_samples is None or max_train_samples <= 0:
+        return n
+    return min(n, max_train_samples)
+
+
+def _subsample(
+    images: torch.Tensor,
+    labels: torch.Tensor,
+    max_train_samples: int | None,
+    seed: int,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Take a deterministic random subset to keep epochs cheap.
+
+    A seeded permutation avoids label skew from any ordering in the source
+    split. Returns the inputs unchanged when no cap applies.
+    """
+    cap = _capped_size(len(labels), max_train_samples)
+    if cap == len(labels):
+        return images, labels
+    generator = torch.Generator()
+    generator.manual_seed(seed)
+    keep = torch.randperm(len(labels), generator=generator)[:cap]
+    return images[keep], labels[keep]
+
+
 # ---------------------------------------------------------------------------
 # Data loading
 # ---------------------------------------------------------------------------
@@ -249,8 +384,10 @@ def load_partition_data(
     partition_id: int,
     num_partitions: int,
     batch_size: int,
+    spec: DatasetSpec,
     partition_config: PartitionConfig | None = None,
     val_ratio: float = 0.1,
+    max_train_samples: int | None = None,
 ) -> tuple[CachedTrainPartition, DataLoader]:
     """Load a partition and return cached train data + valloader.
 
@@ -258,21 +395,35 @@ def load_partition_data(
         partition_id: Zero-based index of this client's partition.
         num_partitions: Total number of client partitions.
         batch_size: Mini-batch size for both loaders.
+        spec: Dataset specification.
         partition_config: Train partitioning configuration.
         val_ratio: Fraction of the partition reserved for validation.
+        max_train_samples: Optional per-client cap on training samples
+            (keeps full-epoch sweeps cheap). ``None`` or ``<= 0`` disables it.
 
     Returns:
         ``(train_partition, valloader)`` over the client's local data.
     """
     partition_config = partition_config or PartitionConfig()
-    cache_key = (partition_id, num_partitions, batch_size, val_ratio, partition_config)
+    cache_key = (
+        spec.name,
+        partition_id,
+        num_partitions,
+        batch_size,
+        val_ratio,
+        max_train_samples or 0,
+        partition_config,
+    )
     if cache_key not in _partition_cache:
-        fds = _get_fds(num_partitions, partition_config)
+        fds = _get_fds(spec, num_partitions, partition_config)
         partition = fds.load_partition(partition_id)
         splits = _split_partition(partition, val_ratio)
-        splits = splits.with_transform(_apply_transforms)
+        splits = splits.with_transform(_make_apply_transforms(spec))
 
         train_images, train_labels = _materialize_split(cast(Dataset, splits["train"]))
+        train_images, train_labels = _subsample(
+            train_images, train_labels, max_train_samples, seed=1234 + partition_id
+        )
         val_images, val_labels = _materialize_split(cast(Dataset, splits["test"]))
 
         _partition_cache[cache_key] = (
@@ -293,19 +444,29 @@ def load_partition_data(
 def get_train_batch_counts(
     num_partitions: int,
     batch_size: int,
+    spec: DatasetSpec,
     partition_config: PartitionConfig | None = None,
     val_ratio: float = 0.1,
+    max_train_samples: int | None = None,
 ) -> tuple[int, ...]:
     """Return train mini-batch counts for every client partition."""
     partition_config = partition_config or PartitionConfig()
-    cache_key = (num_partitions, batch_size, val_ratio, partition_config)
+    cache_key = (
+        spec.name,
+        num_partitions,
+        batch_size,
+        val_ratio,
+        max_train_samples or 0,
+        partition_config,
+    )
     if cache_key not in _train_batch_count_cache:
-        fds = _get_fds(num_partitions, partition_config)
+        fds = _get_fds(spec, num_partitions, partition_config)
         batch_counts = []
         for partition_id in range(num_partitions):
             partition = fds.load_partition(partition_id)
             train_split = _split_partition(partition, val_ratio)["train"]
-            batch_counts.append(ceil(len(train_split) / batch_size))
+            n_train = _capped_size(len(train_split), max_train_samples)
+            batch_counts.append(ceil(n_train / batch_size))
         _train_batch_count_cache[cache_key] = tuple(batch_counts)
     return _train_batch_count_cache[cache_key]
 
@@ -336,33 +497,47 @@ def num_server_rounds_for_target_epochs(
     return target_steps * num_rounds_per_step
 
 
-def make_server_eval_loader(batch_size: int) -> DataLoader:
-    """Return a DataLoader over the full MNIST test split for server evaluation.
+def make_server_eval_loader(
+    batch_size: int,
+    spec: DatasetSpec,
+    max_samples: int | None = None,
+) -> DataLoader:
+    """Return a DataLoader over the test split for server evaluation.
 
     This is used by the server's ``evaluate_fn`` to compute test accuracy using
     the averaged client head weights and the current server tail.
-    """
-    from flwr_datasets import FederatedDataset
 
+    Args:
+        batch_size: Evaluation batch size.
+        spec: Dataset specification.
+        max_samples: Optional cap on the number of test images (a held-out
+            subset, useful to keep frequent evaluation cheap). ``None`` or
+            ``<= 0`` uses the full test split.
+
+    Returns:
+        A ``DataLoader`` over the (optionally capped) test split.
+    """
     test_fds = FederatedDataset(
-        dataset="ylecun/mnist",
+        dataset=spec.hf_path,
         partitioners={"test": IidPartitioner(num_partitions=1)},
     )
     test_partition = test_fds.load_partition(0, split="test")
-    test_partition = test_partition.with_transform(_apply_transforms)
+    if max_samples and max_samples > 0 and len(test_partition) > max_samples:
+        test_partition = test_partition.select(range(max_samples))
+    test_partition = test_partition.with_transform(_make_apply_transforms(spec))
     return DataLoader(cast(Dataset, test_partition), batch_size=batch_size, shuffle=False)
 
 
 # ---------------------------------------------------------------------------
-# Models
+# Models — MNIST MLP
 # ---------------------------------------------------------------------------
 
 
 class ClientHead(nn.Module):
-    """Client-side layers up to (and including) the cut layer.
+    """Client-side MLP layers up to (and including) the cut layer.
 
-    Accepts a flattened 784-dimensional MNIST input and produces a
-    ``hidden_dim``-dimensional activation at the cut point.
+    Accepts a flattened input and produces a ``hidden_dim``-dimensional
+    activation at the cut point.
     """
 
     def __init__(self, input_dim: int = 784, hidden_dim: int = 128) -> None:
@@ -374,7 +549,7 @@ class ClientHead(nn.Module):
 
 
 class ServerTail(nn.Module):
-    """Server-side layers after the cut layer."""
+    """Server-side MLP layers after the cut layer."""
 
     def __init__(self, hidden_dim: int = 128, num_classes: int = 10) -> None:
         super().__init__()
@@ -382,6 +557,79 @@ class ServerTail(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.fc(x)
+
+
+# ---------------------------------------------------------------------------
+# Models — CIFAR-10 CNN
+# ---------------------------------------------------------------------------
+
+
+class ConvClientHead(nn.Module):
+    """Client-side CNN: two conv+ReLU+pool blocks.
+
+    For a 3x32x32 input the activation at the cut point has shape
+    ``(64, 8, 8)``.
+    """
+
+    def __init__(self, in_channels: int = 3) -> None:
+        super().__init__()
+        self.conv1 = nn.Conv2d(in_channels, 32, kernel_size=3, padding=1)
+        self.conv2 = nn.Conv2d(32, 64, kernel_size=3, padding=1)
+        self.pool = nn.MaxPool2d(2, 2)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.pool(torch.relu(self.conv1(x)))
+        x = self.pool(torch.relu(self.conv2(x)))
+        return x
+
+
+class ConvServerTail(nn.Module):
+    """Server-side CNN classifier head.
+
+    Flattens the ``(64, H, W)`` activation and runs two linear layers.
+    """
+
+    def __init__(
+        self, num_classes: int = 10, feature_dim: int = 64 * 8 * 8, hidden_dim: int = 128
+    ) -> None:
+        super().__init__()
+        self.fc1 = nn.Linear(feature_dim, hidden_dim)
+        self.fc2 = nn.Linear(hidden_dim, num_classes)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = torch.flatten(x, 1)
+        x = torch.relu(self.fc1(x))
+        return self.fc2(x)
+
+
+def build_split_models(
+    spec: DatasetSpec,
+    hidden_dim: int = 128,
+    num_classes: int | None = None,
+) -> tuple[nn.Module, nn.Module]:
+    """Construct the (head, tail) pair for a dataset's architecture.
+
+    Args:
+        spec: Dataset specification selecting the architecture.
+        hidden_dim: Hidden width (MLP cut size / CNN tail width).
+        num_classes: Override for the number of output classes; defaults to
+            ``spec.num_classes``.
+
+    Returns:
+        ``(head, tail)`` modules. The head runs on the client, the tail on the
+        server.
+    """
+    classes = spec.num_classes if num_classes is None else num_classes
+    if spec.arch == "mlp":
+        head: nn.Module = ClientHead(spec.input_dim, hidden_dim)
+        tail: nn.Module = ServerTail(hidden_dim, classes)
+        return head, tail
+
+    feature_hw = spec.image_hw // 4  # two stride-2 pools
+    feature_dim = 64 * feature_hw * feature_hw
+    head = ConvClientHead(spec.in_channels)
+    tail = ConvServerTail(classes, feature_dim=feature_dim, hidden_dim=hidden_dim)
+    return head, tail
 
 
 # ---------------------------------------------------------------------------

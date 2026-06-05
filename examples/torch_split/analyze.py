@@ -63,9 +63,15 @@ from torch_split.analysis import (
 
 
 class TorchSplitNet(nn.Module):
-    """Full torch_split architecture as a single profiling-friendly module."""
+    """Full torch_split architecture as a single profiling-friendly module.
 
-    def __init__(self, input_dim: int = 16, hidden_dim: int = 8, num_classes: int = 4):
+    Matches the example's split: ``head_fc`` + ``head_relu`` run on the client,
+    ``tail_fc`` runs on the server.
+    """
+
+    def __init__(
+        self, input_dim: int = 784, hidden_dim: int = 128, num_classes: int = 10
+    ):
         super().__init__()
         self.head_fc = nn.Linear(input_dim, hidden_dim)
         self.head_relu = nn.ReLU()
@@ -73,6 +79,35 @@ class TorchSplitNet(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.tail_fc(self.head_relu(self.head_fc(x)))
+
+
+class TorchSplitCNN(nn.Module):
+    """The example's CIFAR-10 split architecture as one profiling module.
+
+    Client head: ``conv1..pool2`` (activation ``(64, 8, 8)`` for 3x32x32 input).
+    Server tail: ``flatten..fc2``.
+    """
+
+    def __init__(
+        self, in_channels: int = 3, hidden_dim: int = 128, num_classes: int = 10
+    ):
+        super().__init__()
+        self.conv1 = nn.Conv2d(in_channels, 32, kernel_size=3, padding=1)
+        self.relu1 = nn.ReLU()
+        self.pool1 = nn.MaxPool2d(2, 2)
+        self.conv2 = nn.Conv2d(32, 64, kernel_size=3, padding=1)
+        self.relu2 = nn.ReLU()
+        self.pool2 = nn.MaxPool2d(2, 2)
+        self.flatten = nn.Flatten()
+        self.fc1 = nn.Linear(64 * 8 * 8, hidden_dim)
+        self.relu3 = nn.ReLU()
+        self.fc2 = nn.Linear(hidden_dim, num_classes)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.pool1(self.relu1(self.conv1(x)))
+        x = self.pool2(self.relu2(self.conv2(x)))
+        x = self.flatten(x)
+        return self.fc2(self.relu3(self.fc1(x)))
 
 
 class DemoMLP(nn.Module):
@@ -134,8 +169,13 @@ _DTYPE_MAP = {
 _MODELS = {
     "torch_split": {
         "cls": TorchSplitNet,
-        "kwargs": {"input_dim": 16, "hidden_dim": 8, "num_classes": 4},
-        "input_fn": lambda bs, dt: torch.randn(bs, 16, dtype=dt),
+        "kwargs": {"input_dim": 784, "hidden_dim": 128, "num_classes": 10},
+        "input_fn": lambda bs, dt: torch.randn(bs, 784, dtype=dt),
+    },
+    "torch_split_cnn": {
+        "cls": TorchSplitCNN,
+        "kwargs": {"in_channels": 3, "hidden_dim": 128, "num_classes": 10},
+        "input_fn": lambda bs, dt: torch.randn(bs, 3, 32, 32, dtype=dt),
     },
     "mlp": {
         "cls": DemoMLP,

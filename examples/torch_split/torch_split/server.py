@@ -22,7 +22,9 @@ on their own held-out partition without changing the training flow.
 
 from __future__ import annotations
 
+import json
 from logging import INFO
+from pathlib import Path
 
 import torch
 import torch.nn as nn
@@ -37,9 +39,9 @@ from rizemind.split_learning.serialization import tensor_to_parameters
 from rizemind.split_learning.strategy import SplitLearningStrategy
 
 from .task import (
-    ClientHead,
-    ServerTail,
+    build_split_models,
     extract_activation_and_labels,
+    get_dataset_spec,
     get_train_batch_counts,
     get_weights,
     make_server_eval_loader,
@@ -68,11 +70,17 @@ def _parameters_match_model(parameters, model: nn.Module) -> bool:
 
 
 class HeadShapeAwareFedAvg(FedAvg):
-    """FedAvg that skips client evaluation until head weights are available."""
+    """FedAvg that gates distributed evaluation.
 
-    def __init__(self, should_evaluate, *args, **kwargs) -> None:
+    Client-side evaluation is skipped (1) until the global parameters match the
+    client head shape, and (2) on rounds excluded by ``should_evaluate_round``
+    (used to throttle evaluation frequency).
+    """
+
+    def __init__(self, should_evaluate, should_evaluate_round, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.should_evaluate = should_evaluate
+        self.should_evaluate_round = should_evaluate_round
 
     def configure_evaluate(
         self,
@@ -86,6 +94,8 @@ class HeadShapeAwareFedAvg(FedAvg):
                 "configure_evaluate: current parameters do not match client head, "
                 "skipping distributed evaluation",
             )
+            return []
+        if not self.should_evaluate_round(server_round):
             return []
         return super().configure_evaluate(server_round, parameters, client_manager)
 
@@ -189,14 +199,18 @@ def server_fn(context: Context):
     """Build the ServerApp components for split-learning training."""
     cut_layer = int(context.run_config["cut-layer"])
     hidden_dim = int(context.run_config["hidden-dim"])
-    num_classes = int(context.run_config["num-classes"])
-    input_dim = int(context.run_config["input-dim"])
     learning_rate = float(context.run_config["learning-rate"])
     min_clients = int(context.run_config["min-available-clients"])
     batch_size = int(context.run_config["batch-size"])
     val_ratio = float(context.run_config.get("val-ratio", 0.1))
     target_epochs = float(context.run_config.get("target-epochs", 0.0))
     demo = bool(context.run_config.get("demo", False))
+    dataset = str(context.run_config.get("dataset", "mnist"))
+    max_train_samples = int(context.run_config.get("max-train-samples", 0))
+    results_path = str(context.run_config.get("results-path", "")).strip()
+    eval_every = max(1, int(context.run_config.get("eval-every", 1)))
+    eval_max_samples = int(context.run_config.get("eval-max-samples", 0))
+    spec = get_dataset_spec(dataset)
     partition_config = partition_config_from_run_config(context.run_config)
 
     sl_config = SplitLearningConfig(cut_layer=cut_layer)
@@ -206,8 +220,10 @@ def server_fn(context: Context):
         train_batch_counts = get_train_batch_counts(
             num_partitions=min_clients,
             batch_size=batch_size,
+            spec=spec,
             partition_config=partition_config,
             val_ratio=val_ratio,
+            max_train_samples=max_train_samples,
         )
         num_rounds = num_server_rounds_for_target_epochs(
             target_epochs=target_epochs,
@@ -224,16 +240,25 @@ def server_fn(context: Context):
             partition_config.kind,
         )
 
-    tail = ServerTail(hidden_dim, num_classes)
+    eval_head, tail = build_split_models(spec, hidden_dim=hidden_dim)
     initial_parameters = ndarrays_to_parameters(get_weights(tail))
 
     # Shared list that server_backward_fn appends per-round loss to.
     round_losses: list[float] = []
 
     # Load server-side evaluation data once.
-    eval_loader = make_server_eval_loader(batch_size)
-    eval_head = ClientHead(input_dim, hidden_dim)
+    eval_loader = make_server_eval_loader(batch_size, spec, max_samples=eval_max_samples)
     eval_criterion = nn.CrossEntropyLoss()
+
+    if results_path:
+        Path(results_path).parent.mkdir(parents=True, exist_ok=True)
+        Path(results_path).write_text("")
+
+    def should_evaluate_round(server_round: int) -> bool:
+        """Throttle evaluation: every ``eval_every`` rounds, plus the last one."""
+        if eval_every <= 1:
+            return True
+        return server_round % eval_every == 0 or server_round >= num_rounds
 
     def evaluate_fn(
         server_round: int,
@@ -249,6 +274,8 @@ def server_fn(context: Context):
         """
         # Guard: parameters may carry tail weights (wrong shape) in round 0.
         if not _parameters_match_model(parameters, eval_head):
+            return None
+        if not should_evaluate_round(server_round):
             return None
 
         set_weights(eval_head, parameters)
@@ -282,6 +309,18 @@ def server_fn(context: Context):
             accuracy,
             latest_train_loss,
         )
+
+        if results_path:
+            record = {
+                "round": server_round,
+                "step": server_round // sl_config.num_rounds_per_step,
+                "val_loss": avg_loss,
+                "val_accuracy": accuracy,
+                "train_loss": latest_train_loss,
+            }
+            with Path(results_path).open("a") as fh:
+                fh.write(json.dumps(record) + "\n")
+
         return avg_loss, {
             "val_accuracy": accuracy,
             "val_loss": avg_loss,
@@ -298,6 +337,7 @@ def server_fn(context: Context):
     # report validation accuracy on their local held-out partition.
     base_strategy = HeadShapeAwareFedAvg(
         should_evaluate=lambda parameters: _parameters_match_model(parameters, eval_head),
+        should_evaluate_round=should_evaluate_round,
         fraction_fit=1.0,
         fraction_evaluate=1.0,
         min_available_clients=min_clients,

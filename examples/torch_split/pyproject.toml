@@ -24,15 +24,21 @@ serverapp = "torch_split.server:app"
 clientapp = "torch_split.client:app"
 
 [tool.flwr.app.config]
+# Dataset selects both the data and the architecture:
+#   "mnist"   -> 784-dim flattened MLP split
+#   "cifar10" -> 3x32x32 CNN split
+dataset = "mnist"
+
 # num-server-rounds counts actual Flower rounds.
 # Split learning consumes 2 Flower rounds per training step.
-# 10 rounds = 5 SL steps = 5 MNIST mini-batches per client.
+# 10 rounds = 5 SL steps = 5 mini-batches per client.
 num-server-rounds = 10
 target-epochs = 0.0    # when > 0, overrides num-server-rounds using max local train batches
 min-available-clients = 2
 batch-size = 32
 learning-rate = 0.01
 val-ratio = 0.10
+max-train-samples = 0  # per-client training cap; 0 = use the full partition
 partitioner = "iid"    # {"iid", "dirichlet"}
 partition-seed = 42
 dirichlet-alpha = 0.5
@@ -40,10 +46,13 @@ dirichlet-min-partition-size = 10
 dirichlet-self-balancing = false
 
 # Split-learning specific
-cut-layer = 0          # last client-side layer index (0-indexed)
-input-dim = 784        # flattened MNIST: 28x28 = 784
-hidden-dim = 128       # activation dimension at the cut point
-num-classes = 10       # MNIST has 10 digit classes
+cut-layer = 0          # last client-side layer index (informational; split is fixed by the model)
+hidden-dim = 128       # activation dimension at the cut point (MLP) / tail width (CNN)
+
+# Optional: when set, the server appends per-round metrics as JSON lines here.
+results-path = ""
+eval-every = 1         # evaluate every N rounds (throttles centralized + distributed eval)
+eval-max-samples = 0   # cap server-side eval images; 0 = full test split
 
 # Demo mode: set to true for step-by-step logging of each forward/backward round.
 # Override on the command line:  flwr run . --run-config 'demo=true'
@@ -58,3 +67,6 @@ default = "local-simulation"
 
 [tool.flwr.federations.local-simulation]
 options.num-supernodes = 2
+
+[tool.flwr.federations.local-5]
+options.num-supernodes = 5
