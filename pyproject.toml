@@ -133,4 +133,5 @@ members = [
     "examples/torch_shapley",
     "examples/workflow",
     "examples/torch_split",
+    "examples/torch_split_vfl",
 ]

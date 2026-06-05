@@ -1,0 +1,65 @@
+[project]
+name = "torch-split-vfl"
+version = "0.1.0"
+description = "Vertical split federated learning example on MNIST using VerticalSplitLearningStrategy with Flower"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "flwr[simulation]>=1.18.0",
+    "flwr-datasets[vision]>=0.5.0",
+    "torch>=2.6.0",
+    "torchvision>=0.21.0",
+    "rizemind",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["."]
+
+[tool.flwr.app]
+publisher = "trizelabs"
+
+[tool.flwr.app.components]
+serverapp = "torch_split_vfl.server:app"
+clientapp = "torch_split_vfl.client:app"
+
+[tool.flwr.app.config]
+# Dataset (only "mnist" is supported in v1).
+dataset = "mnist"
+
+# Each vertical SL step takes 2 Flower rounds (forward + backward).
+# 20 rounds = 10 SL steps.
+num-server-rounds = 20
+min-available-clients = 2
+batch-size = 64
+learning-rate = 0.05
+hidden-dim = 64
+
+# Per-client cap on training samples (0 = use the full train split).
+# A small cap keeps the smoke-test fast.
+max-train-samples = 2000
+
+# Optional: when set, the server appends per-round metrics as JSON lines here.
+results-path = ""
+
+# Throttle eval frequency and limit test-set size for speed.
+eval-every = 2
+eval-max-samples = 1000
+
+# Demo mode: enable step-by-step logging.
+demo = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.flwr.federations]
+default = "local-simulation"
+
+[tool.flwr.federations.local-simulation]
+options.num-supernodes = 2
+
+[tool.flwr.federations.local-4]
+options.num-supernodes = 4
+
+[tool.flwr.federations.local-7]
+options.num-supernodes = 7
