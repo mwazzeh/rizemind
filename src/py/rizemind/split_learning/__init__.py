@@ -12,10 +12,12 @@ from rizemind.split_learning.serialization import (
     tensor_to_parameters,
 )
 from rizemind.split_learning.strategy import SplitLearningStrategy
+from rizemind.split_learning.vertical_strategy import VerticalSplitLearningStrategy
 
 __all__ = [
     "SplitLearningConfig",
     "SplitLearningStrategy",
+    "VerticalSplitLearningStrategy",
     "parameters_to_tensor",
     "split_learning_mod",
     "tensor_to_parameters",

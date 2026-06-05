@@ -229,7 +229,9 @@ class SplitLearningStrategy(Strategy):
         Returns:
             Evaluation instructions from the base strategy.
         """
-        return self.strategy.configure_evaluate(server_round, parameters, client_manager)
+        return self.strategy.configure_evaluate(
+            server_round, parameters, client_manager
+        )
 
     def aggregate_evaluate(
         self,
