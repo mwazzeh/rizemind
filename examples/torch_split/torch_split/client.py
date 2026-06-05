@@ -51,9 +51,9 @@ from torch.utils.data import DataLoader
 
 from .task import (
     CachedTrainPartition,
-    ClientHead,
-    ServerTail,
+    build_split_models,
     deserialize_ndarrays_from_bytes,
+    get_dataset_spec,
     get_weights,
     load_partition_data,
     partition_config_from_run_config,
@@ -97,7 +97,11 @@ class SplitFlowerClient(NumPyClient):
         self.tail = tail          # held for local evaluate(); weights from server
         self.train_partition = train_partition
         self.valloader = valloader
-        self.optimizer = optim.SGD(head.parameters(), lr=learning_rate, momentum=0.9)
+        # No momentum: a fresh client (and optimizer) is built each round and
+        # momentum buffers are not persisted in context.state, so any momentum
+        # would silently reset every step. Use plain SGD to avoid implying state
+        # that isn't carried across rounds.
+        self.optimizer = optim.SGD(head.parameters(), lr=learning_rate, momentum=0.0)
         self.criterion = nn.CrossEntropyLoss()
         self._ctx = ctx
         self._demo = demo
@@ -266,14 +270,14 @@ def client_fn(context: Context):
     batch_size = int(context.run_config["batch-size"])
     val_ratio = float(context.run_config.get("val-ratio", 0.1))
     learning_rate = float(context.run_config["learning-rate"])
-    input_dim = int(context.run_config["input-dim"])
     hidden_dim = int(context.run_config["hidden-dim"])
-    num_classes = int(context.run_config["num-classes"])
     demo = bool(context.run_config.get("demo", False))
+    dataset = str(context.run_config.get("dataset", "mnist"))
+    max_train_samples = int(context.run_config.get("max-train-samples", 0))
+    spec = get_dataset_spec(dataset)
     partition_config = partition_config_from_run_config(context.run_config)
 
-    head = ClientHead(input_dim, hidden_dim)
-    tail = ServerTail(hidden_dim, num_classes)
+    head, tail = build_split_models(spec, hidden_dim=hidden_dim)
 
     # Restore persisted head weights from previous round.
     if _SL_HEAD_KEY in context.state:
@@ -283,8 +287,10 @@ def client_fn(context: Context):
         partition_id,
         num_partitions,
         batch_size,
+        spec=spec,
         partition_config=partition_config,
         val_ratio=val_ratio,
+        max_train_samples=max_train_samples,
     )
 
     return SplitFlowerClient(

@@ -1,8 +1,11 @@
+import pytest
 import torch
 from torch_split.task import (
     CachedTrainPartition,
     PartitionConfig,
+    build_split_models,
     deserialize_ndarrays_from_bytes,
+    get_dataset_spec,
     num_server_rounds_for_target_epochs,
     partition_config_from_run_config,
     serialize_ndarrays_to_bytes,
@@ -71,6 +74,42 @@ def test_num_server_rounds_for_target_epochs_uses_max_partition_size():
     )
 
     assert rounds == 30
+
+
+def test_get_dataset_spec_rejects_unknown():
+    with pytest.raises(ValueError):
+        get_dataset_spec("fashion")
+
+
+def test_build_split_models_mnist_mlp_shapes():
+    spec = get_dataset_spec("mnist")
+    head, tail = build_split_models(spec, hidden_dim=64)
+
+    x = torch.randn(4, spec.input_dim)
+    activation = head(x)
+    logits = tail(activation)
+
+    assert spec.input_dim == 784
+    assert activation.shape == (4, 64)
+    assert logits.shape == (4, 10)
+
+
+def test_build_split_models_cifar_cnn_shapes_and_backward():
+    spec = get_dataset_spec("cifar10")
+    head, tail = build_split_models(spec, hidden_dim=128)
+
+    x = torch.randn(4, spec.in_channels, spec.image_hw, spec.image_hw)
+    activation = head(x)
+    logits = tail(activation)
+
+    assert activation.shape == (4, 64, 8, 8)
+    assert logits.shape == (4, 10)
+
+    # Gradient at the cut point must flow back to the activation (SL contract).
+    detached = activation.detach().requires_grad_(True)
+    tail(detached).sum().backward()
+    assert detached.grad is not None
+    assert detached.grad.shape == activation.shape
 
 
 def test_ndarray_bytes_round_trip_preserves_order():
