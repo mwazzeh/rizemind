@@ -131,4 +131,5 @@ members = [
     "examples/torch_dyn_diff_privacy_shapley",
     "examples/torch_shapley",
     "examples/torch_split",
+    "examples/torch_split_vfl",
 ]

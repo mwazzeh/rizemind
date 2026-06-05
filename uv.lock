@@ -11,6 +11,7 @@ members = [
     "torch-dyn-diff-privacy-shapley",
     "torch-shapley",
     "torch-split",
+    "torch-split-vfl",
 ]
 
 [[package]]
@@ -3823,6 +3824,27 @@ requires-dist = [
     { name = "flwr", extras = ["simulation"], specifier = ">=1.18.0" },
     { name = "flwr-datasets", extras = ["vision"], specifier = ">=0.5.0" },
     { name = "matplotlib", specifier = ">=3.9" },
+    { name = "rizemind", editable = "." },
+    { name = "torch", specifier = ">=2.6.0" },
+    { name = "torchvision", specifier = ">=0.21.0" },
+]
+
+[[package]]
+name = "torch-split-vfl"
+version = "0.1.0"
+source = { virtual = "examples/torch_split_vfl" }
+dependencies = [
+    { name = "flwr", extra = ["simulation"] },
+    { name = "flwr-datasets", extra = ["vision"] },
+    { name = "rizemind" },
+    { name = "torch" },
+    { name = "torchvision" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "flwr", extras = ["simulation"], specifier = ">=1.18.0" },
+    { name = "flwr-datasets", extras = ["vision"], specifier = ">=0.5.0" },
     { name = "rizemind", editable = "." },
     { name = "torch", specifier = ">=2.6.0" },
     { name = "torchvision", specifier = ">=0.21.0" },
