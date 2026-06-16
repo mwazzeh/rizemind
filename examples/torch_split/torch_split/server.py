@@ -35,6 +35,7 @@ from flwr.server import ServerApp, ServerAppComponents, ServerConfig
 from flwr.server.client_manager import ClientManager
 from flwr.server.strategy import FedAvg
 from rizemind.split_learning.config import SplitLearningConfig
+from rizemind.split_learning.seeding import seed_everything
 from rizemind.split_learning.serialization import tensor_to_parameters
 from rizemind.split_learning.strategy import SplitLearningStrategy
 
@@ -239,6 +240,9 @@ def server_fn(context: Context):
             max(train_batch_counts),
             partition_config.kind,
         )
+
+    seed = int(context.run_config.get("seed", 42))
+    seed_everything(seed)
 
     eval_head, tail = build_split_models(spec, hidden_dim=hidden_dim)
     initial_parameters = ndarrays_to_parameters(get_weights(tail))

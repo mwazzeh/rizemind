@@ -33,6 +33,10 @@ dataset = "mnist"
 # Split learning consumes 2 Flower rounds per training step.
 # 10 rounds = 5 SL steps = 5 mini-batches per client.
 num-server-rounds = 10
+# Reproducibility: seeds model init (server tail + each head by seed+pid). The
+# data partitioning has its own `partition-seed` below. Same seed+config =>
+# reproducible run; different seed => an independent trial.
+seed = 42
 target-epochs = 0.0    # when > 0, overrides num-server-rounds using max local train batches
 min-available-clients = 2
 batch-size = 32

@@ -1,15 +1,12 @@
 # torch_split — Federated Split Learning on MNIST and CIFAR-10
 
-A runnable example of **split learning** built on Rizemind's
-`SplitLearningStrategy` and the [Flower](https://flower.ai) framework.
+Horizontal split learning over `SplitLearningStrategy`. The network is
+partitioned at a *cut layer*: each client owns the first layers (the head) and
+the server owns the rest (the tail). Clients never share raw weights for the
+server's layers, and the server never sees the raw input — only the activations
+at the cut point cross the wire.
 
-In split learning the neural network is partitioned at a *cut layer*: each
-client owns the first layers (the **head**) and the server owns the rest (the
-**tail**). Clients never share raw model weights for the server's layers, and
-the server never sees the raw input data — only the activations at the cut
-point cross the wire.
-
-This example trains across simulated clients on either dataset and shows the
+The example trains across simulated clients on either dataset and exercises the
 full forward/backward protocol, optional step-by-step logging, a companion tool
 for choosing where to split a model, and a reproducible experiment sweep.
 
@@ -126,6 +123,7 @@ overridden per run with `--run-config 'key=value key2=value2'`.
 |---|---|---|
 | `dataset` | `"mnist"` | `"mnist"` (MLP) or `"cifar10"` (CNN). Selects data *and* architecture. |
 | `num-server-rounds` | `10` | Total Flower rounds. Two rounds = one training step, so this must be even. |
+| `seed` | `42` | Seeds model init (tail + each head by `seed+pid`) for reproducible runs. Data partitioning uses `partition-seed`. Same seed+config ⇒ reproducible; different seed ⇒ independent trial. |
 | `target-epochs` | `0.0` | When `> 0`, overrides `num-server-rounds` to cover roughly this many local epochs (see below). |
 | `min-available-clients` | `2` | Clients required before a round starts. Set equal to the federation's supernode count. |
 | `batch-size` | `32` | Mini-batch size for training and evaluation. |

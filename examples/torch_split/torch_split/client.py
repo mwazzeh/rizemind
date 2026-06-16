@@ -47,6 +47,7 @@ from flwr.common import Context
 from flwr.common.logger import log
 from flwr.common.record import ArrayRecord, ConfigRecord
 from rizemind.split_learning.mod import SL_PHASE_BACKWARD, SL_PHASE_KEY
+from rizemind.split_learning.seeding import seed_everything
 from torch.utils.data import DataLoader
 
 from .task import (
@@ -274,8 +275,12 @@ def client_fn(context: Context):
     demo = bool(context.run_config.get("demo", False))
     dataset = str(context.run_config.get("dataset", "mnist"))
     max_train_samples = int(context.run_config.get("max-train-samples", 0))
+    seed = int(context.run_config.get("seed", 42))
     spec = get_dataset_spec(dataset)
     partition_config = partition_config_from_run_config(context.run_config)
+
+    # First-class reproducibility: seed head init per client (seed + pid).
+    seed_everything(seed + partition_id)
 
     head, tail = build_split_models(spec, hidden_dim=hidden_dim)
 
