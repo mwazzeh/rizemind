@@ -25,3 +25,12 @@ poetry.lock
 
 # Generated analysis/profiling output
 **/split_analysis.png
+
+# Example experiment outputs — regenerate via experiments/run_sweep.py and
+# experiments/plot_results.py; not committed.
+**/experiments/results/
+**/experiments/plots/
+# Stray per-run dumps from `flwr run ... --run-config 'results-path=...'`
+examples/torch_split/*.jsonl
+examples/torch_split_vfl/*.jsonl
+**/*.summary.json
