@@ -2,7 +2,6 @@
 
 import numpy as np
 import pytest
-
 from rizemind.split_learning.telemetry import (
     RunTelemetry,
     StepTelemetry,
@@ -72,3 +71,55 @@ def test_timings_accumulate():
     step.add_time("x", 0.5)
     step.add_time("x", 0.25)
     assert step.timings_s["x"] == 0.75
+
+
+def test_run_per_party_cumulative():
+    run = RunTelemetry()
+    for _ in range(2):
+        s = StepTelemetry()
+        s.add_activation(0, np.zeros((1, 5), dtype=np.float32))  # 20 bytes
+        s.add_activation(1, np.zeros((1, 10), dtype=np.float32))  # 40 bytes
+        s.add_gradient(0, np.zeros((1, 5), dtype=np.float32))
+        run.record_step(s)
+    d = run.as_dict()
+    assert d["activation_bytes_per_party"] == {0: 40, 1: 80}  # 2 steps each
+    assert d["gradient_bytes_per_party"] == {0: 40}
+    # aggregate equals the sum of per-party
+    assert d["cumulative_activation_bytes"] == 120
+
+
+def test_record_privacy_running_mean_and_last():
+    run = RunTelemetry()
+    run.record_privacy(
+        {
+            "pre_clip_norm_mean": 1.0,
+            "clip_fraction": 0.4,
+            "gradient_privacy_mode": "gaussian",
+        }
+    )
+    run.record_privacy(
+        {
+            "pre_clip_norm_mean": 3.0,
+            "clip_fraction": 0.6,
+            "gradient_privacy_mode": "gaussian",
+        }
+    )
+    assert run.n_privacy_steps == 2
+    mean = run.privacy_mean()
+    assert mean["pre_clip_norm_mean"] == pytest.approx(2.0)
+    assert mean["clip_fraction"] == pytest.approx(0.5)
+    d = run.as_dict()
+    assert d["privacy_diagnostics_last"]["clip_fraction"] == 0.6
+    assert "privacy_diagnostics_mean" in d
+
+
+def test_protected_gradient_bytes_surface_in_dict():
+    run = RunTelemetry()
+    run.cumulative_protected_gradient_bytes = 4096
+    run.record_privacy({"clip_fraction": 0.1})
+    assert run.as_dict()["cumulative_protected_gradient_bytes"] == 4096
+
+
+def test_no_privacy_section_when_unused():
+    run = RunTelemetry()
+    assert "privacy_diagnostics_last" not in run.as_dict()

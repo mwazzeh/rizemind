@@ -1,7 +1,6 @@
 """Tests for rizemind.split_learning.metrics."""
 
 import numpy as np
-
 from rizemind.split_learning.metrics import (
     classification_metrics,
     confusion_counts,
