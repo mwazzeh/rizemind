@@ -58,17 +58,27 @@ class StepTelemetry:
     sl_step: int = 0
     activation_bytes: dict[int, int] = field(default_factory=dict)
     gradient_bytes: dict[int, int] = field(default_factory=dict)
+    #: Extra routing payloads (e.g. label-private coordinator<->label-holder
+    #: representation downlink / joint-gradient uplink). Tensor estimates.
+    routing_bytes: dict[str, int] = field(default_factory=dict)
     timings_s: dict[str, float] = field(default_factory=dict)
 
     def add_activation(self, partition_id: int, tensor) -> int:
         b = tensor_payload_bytes(tensor)
-        self.activation_bytes[partition_id] = self.activation_bytes.get(partition_id, 0) + b
+        self.activation_bytes[partition_id] = (
+            self.activation_bytes.get(partition_id, 0) + b
+        )
         return b
 
     def add_gradient(self, partition_id: int, tensor) -> int:
         b = tensor_payload_bytes(tensor)
         self.gradient_bytes[partition_id] = self.gradient_bytes.get(partition_id, 0) + b
         return b
+
+    def add_routing(self, channel: str, num_bytes: int) -> None:
+        self.routing_bytes[channel] = self.routing_bytes.get(channel, 0) + int(
+            num_bytes
+        )
 
     def add_time(self, phase: str, seconds: float) -> None:
         self.timings_s[phase] = self.timings_s.get(phase, 0.0) + float(seconds)
@@ -82,8 +92,16 @@ class StepTelemetry:
         return int(sum(self.gradient_bytes.values()))
 
     @property
+    def total_routing_bytes(self) -> int:
+        return int(sum(self.routing_bytes.values()))
+
+    @property
     def total_payload_bytes(self) -> int:
-        return self.total_activation_bytes + self.total_gradient_bytes
+        return (
+            self.total_activation_bytes
+            + self.total_gradient_bytes
+            + self.total_routing_bytes
+        )
 
     def as_dict(self) -> dict:
         return {
@@ -92,6 +110,8 @@ class StepTelemetry:
             "gradient_bytes_per_party": dict(sorted(self.gradient_bytes.items())),
             "total_activation_bytes": self.total_activation_bytes,
             "total_gradient_bytes": self.total_gradient_bytes,
+            "routing_bytes": dict(self.routing_bytes),
+            "total_routing_bytes": self.total_routing_bytes,
             "total_payload_bytes": self.total_payload_bytes,
             "timings_s": dict(self.timings_s),
         }
@@ -99,35 +119,100 @@ class StepTelemetry:
 
 @dataclass
 class RunTelemetry:
-    """Cumulative telemetry across all SL steps of a run."""
+    """Cumulative telemetry across all SL steps of a run (aggregate + per-party)."""
 
     cumulative_activation_bytes: int = 0
     cumulative_gradient_bytes: int = 0
+    cumulative_routing_bytes: int = 0
+    activation_bytes_per_party: dict[int, int] = field(default_factory=dict)
+    gradient_bytes_per_party: dict[int, int] = field(default_factory=dict)
+    routing_bytes: dict[str, int] = field(default_factory=dict)
     n_steps: int = 0
     timings_s: dict[str, float] = field(default_factory=dict)
+    #: Latest aggregate gradient-privacy diagnostics (norm stats, clip fraction,
+    #: sigma, SNR). Aggregate, non-sensitive: never an individual gradient vector.
+    privacy_diagnostics: dict[str, float] = field(default_factory=dict)
+    #: Mean over steps of the gradient-privacy norm diagnostics (running mean).
+    _privacy_running_sum: dict[str, float] = field(default_factory=dict)
+    n_privacy_steps: int = 0
+    #: Bytes of the protected joint gradient released to the coordinator.
+    cumulative_protected_gradient_bytes: int = 0
+
+    def record_privacy(self, diag: dict) -> None:
+        """Fold one step's gradient-privacy diagnostics into the run aggregate.
+
+        Stores the latest snapshot and a running mean of the numeric norm/clip
+        statistics. Only aggregate scalars are accepted (the producer guarantees
+        no raw gradient vectors).
+        """
+        self.privacy_diagnostics = dict(diag)
+        self.n_privacy_steps += 1
+        for k, v in diag.items():
+            if isinstance(v, (int, float)) and not isinstance(v, bool):
+                self._privacy_running_sum[k] = self._privacy_running_sum.get(
+                    k, 0.0
+                ) + float(v)
+
+    def privacy_mean(self) -> dict[str, float]:
+        """Return the per-step mean of the recorded numeric privacy diagnostics."""
+        if self.n_privacy_steps == 0:
+            return {}
+        return {
+            k: v / self.n_privacy_steps for k, v in self._privacy_running_sum.items()
+        }
 
     def record_step(self, step: StepTelemetry) -> None:
         self.cumulative_activation_bytes += step.total_activation_bytes
         self.cumulative_gradient_bytes += step.total_gradient_bytes
+        self.cumulative_routing_bytes += step.total_routing_bytes
+        for pid, b in step.activation_bytes.items():
+            self.activation_bytes_per_party[pid] = (
+                self.activation_bytes_per_party.get(pid, 0) + b
+            )
+        for pid, b in step.gradient_bytes.items():
+            self.gradient_bytes_per_party[pid] = (
+                self.gradient_bytes_per_party.get(pid, 0) + b
+            )
+        for ch, b in step.routing_bytes.items():
+            self.routing_bytes[ch] = self.routing_bytes.get(ch, 0) + b
         self.n_steps += 1
         for k, v in step.timings_s.items():
             self.timings_s[k] = self.timings_s.get(k, 0.0) + v
 
     @property
     def cumulative_payload_bytes(self) -> int:
-        return self.cumulative_activation_bytes + self.cumulative_gradient_bytes
+        return (
+            self.cumulative_activation_bytes
+            + self.cumulative_gradient_bytes
+            + self.cumulative_routing_bytes
+        )
 
     def as_dict(self) -> dict:
-        return {
+        out = {
             "n_steps": self.n_steps,
             "cumulative_activation_bytes": self.cumulative_activation_bytes,
             "cumulative_gradient_bytes": self.cumulative_gradient_bytes,
+            "cumulative_routing_bytes": self.cumulative_routing_bytes,
             "cumulative_payload_bytes": self.cumulative_payload_bytes,
+            "activation_bytes_per_party": dict(
+                sorted(self.activation_bytes_per_party.items())
+            ),
+            "gradient_bytes_per_party": dict(
+                sorted(self.gradient_bytes_per_party.items())
+            ),
+            "routing_bytes": dict(self.routing_bytes),
             "mean_activation_bytes_per_step": (
                 self.cumulative_activation_bytes / self.n_steps if self.n_steps else 0.0
             ),
             "timings_s": dict(self.timings_s),
         }
+        if self.n_privacy_steps:
+            out["privacy_diagnostics_last"] = dict(self.privacy_diagnostics)
+            out["privacy_diagnostics_mean"] = self.privacy_mean()
+            out["cumulative_protected_gradient_bytes"] = (
+                self.cumulative_protected_gradient_bytes
+            )
+        return out
 
 
 class timed:
@@ -142,7 +227,7 @@ class timed:
         self._key = key
         self._start = 0.0
 
-    def __enter__(self) -> "timed":
+    def __enter__(self) -> timed:
         self._start = time.perf_counter()
         return self
 
