@@ -4,7 +4,8 @@ import numpy as np
 import pytest
 import torch
 import torch.nn as nn
-
+from rizemind.split_learning.serialization import tensor_to_parameters
+from rizemind.split_learning.telemetry import RunTelemetry
 from torch_split_vfl.server import make_on_train_step
 from torch_split_vfl.task import (
     build_bottom_model,
@@ -17,8 +18,6 @@ from torch_split_vfl.task import (
     party_feature_dim,
     resolve_active_groups,
 )
-from rizemind.split_learning.serialization import tensor_to_parameters
-from rizemind.split_learning.telemetry import RunTelemetry
 
 
 # --------------------------------------------------------------------------

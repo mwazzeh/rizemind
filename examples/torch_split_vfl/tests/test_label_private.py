@@ -10,10 +10,8 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 import torch
-import torch.nn as nn
 from flwr.common import ndarrays_to_parameters, parameters_to_ndarrays
 from flwr.common.typing import Code, FitRes, Status
-
 from rizemind.split_learning.config import SplitLearningConfig
 from rizemind.split_learning.label_private_strategy import (
     LP_PHASE_KEY,
@@ -201,7 +199,7 @@ def _make_label_holder_client():
     lh = LabelHolderContext(
         top_model=top, top_lr=0.1, num_classes=2,
         label_train=VerticalPartition(
-            features=torch.randint(0, 2, (10,)), batch_size=BATCH),
+            features=torch.randint(0, 2, (64,)), batch_size=BATCH),
         test_labels=torch.randint(0, 2, (12,)),
     )
     client = VerticalSplitClient(0, bottom, train_part, 0.1, ctx, label_holder=lh)

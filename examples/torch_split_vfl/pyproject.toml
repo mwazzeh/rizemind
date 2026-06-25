@@ -23,8 +23,47 @@ serverapp = "torch_split_vfl.server:app"
 clientapp = "torch_split_vfl.client:app"
 
 [tool.flwr.app.config]
-# Dataset (only "mnist" is supported in v1).
+# Dataset: "mnist" (image strips) or "adult" (tabular semantic columns).
 dataset = "mnist"
+
+# Reproducibility: seeds model init (server tail + each bottom by seed+pid) and
+# the per-epoch batch shuffle. Same seed+config => same run; different seed =>
+# an independent trial. Replaces the old external sitecustomize shim.
+seed = 42
+
+# Genuine federated feature ablations (tabular only). Comma-separated feature
+# group ids, e.g. "0", "1", or "0,1". Empty / "all" = every configured group.
+# The count must equal min-available-clients (so party-0-only uses K=1).
+active-parties = ""
+
+# Label-private mode: keep labels + the top model off the coordinator. When true,
+# only `label-holder-party` (a partition id in [0, min-available-clients)) loads
+# labels and runs the top model; the server never sees labels. Uses a 3-round
+# (collect/compute/distribute) step, so set num-server-rounds to a multiple of 3.
+# Protects labels from the coordinator only — NOT activations/gradients (see README).
+label-private = false
+label-holder-party = 0
+
+# Phase-4 cut-gradient privacy (label-holder side, label-private mode only).
+# Mode: "none" (no change), "clip" (per-sample L2 clip), "gaussian" (clip +
+# per-row Gaussian noise). Noise std = gradient-noise-multiplier * gradient-clip-norm,
+# added independently to each released per-sample gradient row BEFORE it leaves
+# the holder. This is clipped Gaussian gradient perturbation, NOT formally DP
+# (no audited accountant; epsilon is null). See README + THREAT_MODEL.
+gradient-privacy-mode = "none"
+gradient-clip-norm = 1.0
+gradient-noise-multiplier = 0.0
+privacy-delta = 1e-5
+# RNG for the noise: "research-seeded" (reproducible, NOT for real deployment) or
+# "secure" (OS entropy, no reusable seed persisted).
+privacy-rng-mode = "research-seeded"
+
+# Label-inference attack benchmark (binary tasks only, e.g. Adult). Runs on the
+# coordinator-visible cut gradients at eval rounds; reports aggregate attack
+# metrics only (no labels, no raw gradients).
+attack-enabled = true
+attack-seed = 0
+attack-shadow-fraction = 0.5
 
 # Each vertical SL step takes 2 Flower rounds (forward + backward).
 # 20 rounds = 10 SL steps.
@@ -54,6 +93,11 @@ pythonpath = ["."]
 
 [tool.flwr.federations]
 default = "local-simulation"
+
+# Single active party — used for genuine 1-party Adult feature ablations
+# (e.g. `--run-config 'dataset="adult" min-available-clients=1 active-parties="0"'`).
+[tool.flwr.federations.local-1]
+options.num-supernodes = 1
 
 [tool.flwr.federations.local-simulation]
 options.num-supernodes = 2

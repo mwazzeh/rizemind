@@ -493,6 +493,103 @@ def _validate_tabular_clients(spec: DatasetSpec, num_clients: int) -> None:
         )
 
 
+def parse_active_parties(value: object) -> tuple[int, ...] | None:
+    """Parse the ``active-parties`` run-config value into group ids.
+
+    Accepts a comma-separated string (e.g. ``"0,1"``, ``"1"``), an empty string
+    or ``"all"`` (meaning "all configured groups", returned as ``None``), or
+    ``None``.
+
+    Args:
+        value: Raw config value.
+
+    Returns:
+        Tuple of group ids, or ``None`` for the default (all groups).
+
+    Raises:
+        ValueError: If a token is not an integer.
+    """
+    if value is None:
+        return None
+    s = str(value).strip().lower()
+    if s in ("", "all"):
+        return None
+    try:
+        return tuple(int(tok) for tok in s.replace(" ", "").split(",") if tok != "")
+    except ValueError as exc:
+        raise ValueError(
+            f"active-parties must be a comma-separated list of integers, got {value!r}"
+        ) from exc
+
+
+def num_configured_parties(spec: DatasetSpec, num_clients: int) -> int:
+    """Return the number of feature groups the dataset defines.
+
+    For tabular datasets this is the number of column groups in the spec; for
+    image datasets each of the ``num_clients`` vertical strips is a party.
+    """
+    if spec.kind == "tabular":
+        assert spec.tabular is not None
+        return len(spec.tabular.party_columns)
+    return num_clients
+
+
+def resolve_active_groups(
+    spec: DatasetSpec,
+    num_clients: int,
+    active_parties: Sequence[int] | None = None,
+) -> list[int]:
+    """Map active client slots to dataset feature-group ids.
+
+    The returned list has length ``num_clients``; entry ``i`` is the feature
+    group that client ``partition_id=i`` owns. This is what makes genuine
+    federated feature ablations possible: e.g. a 1-client run with
+    ``active_parties=[1]`` trains only on Adult's work/financial group.
+
+    Args:
+        spec: Dataset specification.
+        num_clients: Number of active vertical participants (K).
+        active_parties: Optional explicit feature-group ids to activate, in
+            client order. ``None`` means "all configured groups in order".
+
+    Returns:
+        Feature-group id per client slot.
+
+    Raises:
+        ValueError: For tabular datasets, if the count, range, or uniqueness of
+            ``active_parties`` is invalid. For image datasets, if a non-trivial
+            subset is requested (strip subsetting is not supported).
+    """
+    if spec.kind == "tabular":
+        assert spec.tabular is not None
+        n_groups = len(spec.tabular.party_columns)
+        groups = list(range(n_groups)) if active_parties is None else list(active_parties)
+        if len(groups) == 0:
+            raise ValueError("active_parties must select at least one feature group")
+        if len(groups) != num_clients:
+            raise ValueError(
+                f"active_parties selects {len(groups)} group(s) {groups} but "
+                f"min-available-clients={num_clients}; they must match"
+            )
+        for g in groups:
+            if not 0 <= g < n_groups:
+                raise ValueError(
+                    f"active party {g} out of range; dataset {spec.name!r} has "
+                    f"{n_groups} feature groups (valid ids 0..{n_groups - 1})"
+                )
+        if len(set(groups)) != len(groups):
+            raise ValueError(f"active_parties has duplicate group ids: {groups}")
+        return groups
+
+    # Image datasets: parties are vertical strips indexed by partition_id.
+    if active_parties is not None and list(active_parties) != list(range(num_clients)):
+        raise ValueError(
+            "active-parties subset selection is only supported for tabular "
+            "datasets; image strips are defined by num_clients"
+        )
+    return list(range(num_clients))
+
+
 # ---------------------------------------------------------------------------
 # Vertical partitions (shared sample order across all parties)
 # ---------------------------------------------------------------------------
@@ -518,6 +615,7 @@ class VerticalPartition:
 
     features: torch.Tensor
     batch_size: int
+    shuffle_seed: int = VFL_SHUFFLE_SEED
     _cached_epoch: int | None = field(default=None, init=False, repr=False)
     _cached_perm: torch.Tensor | None = field(default=None, init=False, repr=False)
 
@@ -539,7 +637,7 @@ class VerticalPartition:
     def _permutation_for_epoch(self, epoch: int) -> torch.Tensor:
         if self._cached_epoch != epoch or self._cached_perm is None:
             gen = torch.Generator()
-            gen.manual_seed(VFL_SHUFFLE_SEED + epoch)
+            gen.manual_seed(self.shuffle_seed + epoch)
             self._cached_perm = torch.randperm(self.num_total, generator=gen)
             self._cached_epoch = epoch
         return self._cached_perm
@@ -575,6 +673,8 @@ def make_client_train_partition(
     num_clients: int,
     batch_size: int,
     max_train_samples: int | None = None,
+    active_parties: Sequence[int] | None = None,
+    shuffle_seed: int = VFL_SHUFFLE_SEED,
 ) -> VerticalPartition:
     """Build the client's vertical strip view of the train split.
 
@@ -585,27 +685,34 @@ def make_client_train_partition(
         batch_size: Mini-batch size.
         max_train_samples: Optional cap on training samples (``None`` / ``<= 0``
             uses the full train split).
+        active_parties: Optional feature-group selection (tabular only); see
+            :func:`resolve_active_groups`.
+        shuffle_seed: Per-epoch batch-permutation seed; must be identical on
+            every party so sample ids stay aligned.
 
     Returns:
         A :class:`VerticalPartition` whose feature dimension equals the
         client's strip (image) or column group (tabular), flattened.
     """
     if spec.kind == "tabular":
-        _validate_tabular_clients(spec, num_clients)
-        features = load_tabular(spec).party_train[partition_id]
+        group = resolve_active_groups(spec, num_clients, active_parties)[partition_id]
+        features = load_tabular(spec).party_train[group]
     else:
         images, _labels = load_full_train(spec)
         start, stop = strip_bounds(partition_id, num_clients, spec.image_hw)
         strip = images[:, :, :, start:stop].contiguous()  # (N, C, H, strip_w)
         features = strip.view(strip.shape[0], -1)  # (N, C*H*strip_w)
     features = _maybe_cap(features, max_train_samples)
-    return VerticalPartition(features=features, batch_size=batch_size)
+    return VerticalPartition(
+        features=features, batch_size=batch_size, shuffle_seed=shuffle_seed
+    )
 
 
 def make_server_train_labels(
     spec: DatasetSpec,
     batch_size: int,
     max_train_samples: int | None = None,
+    shuffle_seed: int = VFL_SHUFFLE_SEED,
 ) -> VerticalPartition:
     """Build the server's label-only view of the train split.
 
@@ -613,6 +720,8 @@ def make_server_train_labels(
         spec: Dataset specification.
         batch_size: Mini-batch size (must match clients).
         max_train_samples: Optional cap (must match the clients' cap).
+        shuffle_seed: Must match the clients' ``shuffle_seed`` so the label
+            batch lines up with the activation batch.
 
     Returns:
         A :class:`VerticalPartition` whose ``features`` tensor is the
@@ -623,23 +732,31 @@ def make_server_train_labels(
     else:
         _images, labels = load_full_train(spec)
     labels = _maybe_cap(labels, max_train_samples)
-    return VerticalPartition(features=labels, batch_size=batch_size)
+    return VerticalPartition(
+        features=labels, batch_size=batch_size, shuffle_seed=shuffle_seed
+    )
 
 
-def party_feature_dim(spec: DatasetSpec, partition_id: int, num_clients: int) -> int:
+def party_feature_dim(
+    spec: DatasetSpec,
+    partition_id: int,
+    num_clients: int,
+    active_parties: Sequence[int] | None = None,
+) -> int:
     """Return the encoded input width of one party's bottom model.
 
     Args:
         spec: Dataset specification.
         partition_id: Zero-based party id.
         num_clients: Total number of vertical participants.
+        active_parties: Optional feature-group selection (tabular only).
 
     Returns:
         Flattened feature size for the party (image strip or tabular columns).
     """
     if spec.kind == "tabular":
-        _validate_tabular_clients(spec, num_clients)
-        return load_tabular(spec).party_dims[partition_id]
+        group = resolve_active_groups(spec, num_clients, active_parties)[partition_id]
+        return load_tabular(spec).party_dims[group]
     return strip_feature_dim(spec, partition_id, num_clients)
 
 
@@ -648,6 +765,7 @@ def party_test_features(
     partition_id: int,
     num_clients: int,
     max_samples: int | None = None,
+    active_parties: Sequence[int] | None = None,
 ) -> torch.Tensor:
     """Return one party's flattened test features ``(M, d_p)``.
 
@@ -655,8 +773,8 @@ def party_test_features(
     :func:`test_labels`, so labels and features stay aligned.
     """
     if spec.kind == "tabular":
-        _validate_tabular_clients(spec, num_clients)
-        return _maybe_cap(load_tabular(spec).party_test[partition_id], max_samples)
+        group = resolve_active_groups(spec, num_clients, active_parties)[partition_id]
+        return _maybe_cap(load_tabular(spec).party_test[group], max_samples)
     images, _labels = load_full_test(spec)
     images = _maybe_cap(images, max_samples)
     start, stop = strip_bounds(partition_id, num_clients, spec.image_hw)
@@ -718,9 +836,10 @@ def build_bottom_model(
     partition_id: int,
     num_clients: int,
     hidden_dim: int = 64,
+    active_parties: Sequence[int] | None = None,
 ) -> nn.Module:
     """Construct the bottom MLP for one client given its feature size."""
-    in_features = party_feature_dim(spec, partition_id, num_clients)
+    in_features = party_feature_dim(spec, partition_id, num_clients, active_parties)
     return BottomMLP(in_features=in_features, hidden_dim=hidden_dim)
 
 
