@@ -1,7 +1,7 @@
 """Clipped-Gaussian perturbation of cut gradients at the label holder.
 
 In label-private VFL the label holder computes the joint cut gradient
-``G ∈ R^{B×D}`` (``D = K·H``) and returns it to the coordinator, which forwards
+``G in R^{BxD}`` (``D = K*H``) and returns it to the coordinator, which forwards
 each party its slice. The sign/direction/magnitude of these rows is
 label-correlated, so an honest-but-curious coordinator can infer labels from
 them (see ``THREAT_MODEL.md``). This module bounds and masks that signal **before
@@ -9,15 +9,15 @@ any coordinator-bound serialization**.
 
 Mechanism (exact order), applied to the joint per-sample gradient matrix ``G``:
 
-1. compute each sample row's L2 norm ``‖G_i‖₂``;
-2. **clip** each row to the bound ``C``: ``G_i ← G_i · min(1, C/‖G_i‖₂)``;
+1. compute each sample row's L2 norm ``||G_i||2``;
+2. **clip** each row to the bound ``C``: ``G_i <- G_i * min(1, C/||G_i||2)``;
 3. **add Gaussian noise** to each released per-sample row independently:
-   ``G̃_i = clip(G_i) + N(0, σ² I_D)`` with ``σ = noise_multiplier · C``;
+   ``G̃_i = clip(G_i) + N(0, sigma^2 I_D)`` with ``sigma = noise_multiplier * C``;
 4. the (still per-sample) protected matrix ``G̃`` is split back into party slices
    by the caller and serialized.
 
 Noise semantics (unambiguous): noise is added **independently to each released
-per-sample row**, with per-coordinate standard deviation ``σ = z · C`` where
+per-sample row**, with per-coordinate standard deviation ``sigma = z * C`` where
 ``z`` is the noise multiplier. It is *not* added to a sum or to an average — the
 protocol requires a usable per-sample gradient for every party, so a
 sum-then-noise (DP-SGD) construction would not fit without changing the protocol.
@@ -26,13 +26,13 @@ analysis that is **not** claimed here; see :func:`GradientPrivacyConfig` and
 ``THREAT_MODEL.md`` (``formal_dp_claim = false`` by default).
 
 This module is NumPy-only and records aggregate, non-sensitive diagnostics
-(norm statistics, clip fraction, σ, SNR). It never logs or returns an individual
+(norm statistics, clip fraction, sigma, SNR). It never logs or returns an individual
 gradient vector.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import numpy as np
 
@@ -65,16 +65,16 @@ class GradientPrivacyConfig:
             ``"gaussian"`` (clip + per-row Gaussian noise).
         clip_norm: Per-sample L2 clipping bound ``C`` (> 0). Ignored in
             ``"none"`` mode.
-        noise_multiplier: ``z`` such that noise σ = ``z · clip_norm``. Used only
+        noise_multiplier: ``z`` such that noise sigma = ``z * clip_norm``. Used only
             in ``"gaussian"`` mode. ``0.0`` makes ``"gaussian"`` equivalent to
             ``"clip"``.
-        delta: Target δ recorded for *future* privacy accounting. Not used to
-            compute any ε here.
+        delta: Target delta recorded for *future* privacy accounting. Not used to
+            compute any epsilon here.
         rng_mode: ``"research-seeded"`` (reproducible, deterministic — NOT for a
             real privacy deployment) or ``"secure"`` (OS-backed entropy, no
             reusable seed persisted).
         formal_dp_claim: Always ``False`` in this phase — no audited accountant
-            backs an ε under the actual sampling/composition. Kept as an explicit
+            backs an epsilon under the actual sampling/composition. Kept as an explicit
             field so result readers never have to infer it.
     """
 
@@ -105,7 +105,7 @@ class GradientPrivacyConfig:
 
     @property
     def noise_std(self) -> float:
-        """Per-coordinate Gaussian σ actually applied (0 unless gaussian mode)."""
+        """Per-coordinate Gaussian sigma actually applied (0 unless gaussian mode)."""
         if self.mode != MODE_GAUSSIAN:
             return 0.0
         return float(self.noise_multiplier) * float(self.clip_norm)
@@ -130,7 +130,9 @@ class GradientPrivacyConfig:
         }
 
 
-def make_rng(config: GradientPrivacyConfig, *, research_seed: int | None) -> np.random.Generator:
+def make_rng(
+    config: GradientPrivacyConfig, *, research_seed: int | None
+) -> np.random.Generator:
     """Build the noise RNG for a release.
 
     Research-seeded mode returns a deterministic generator from ``research_seed``
@@ -168,7 +170,7 @@ def row_l2_norms(grad: np.ndarray) -> np.ndarray:
 def clip_rows(grad: np.ndarray, clip_norm: float) -> tuple[np.ndarray, np.ndarray]:
     """Clip each row of ``grad`` to L2 norm ``clip_norm``.
 
-    Row ``i`` is scaled by ``min(1, clip_norm / ‖row_i‖₂)``. Zero rows are left
+    Row ``i`` is scaled by ``min(1, clip_norm / ||row_i||2)``. Zero rows are left
     unchanged (no division by zero).
 
     Args:
@@ -194,13 +196,6 @@ def clip_rows(grad: np.ndarray, clip_norm: float) -> tuple[np.ndarray, np.ndarra
     return clipped.astype(np.float32, copy=False), norms
 
 
-@dataclass
-class _Diag:
-    """Internal mutable diagnostics accumulator (aggregate, non-sensitive)."""
-
-    fields: dict = field(default_factory=dict)
-
-
 def privatize_joint_gradient(
     grad: np.ndarray,
     config: GradientPrivacyConfig,
@@ -211,7 +206,7 @@ def privatize_joint_gradient(
     """Apply the clip + Gaussian mechanism to a joint cut-gradient matrix.
 
     Processing order (see module docstring): per-row L2 norm → clip each row to
-    ``C`` → add per-row Gaussian noise ``N(0, σ²I)`` with ``σ = z·C`` (gaussian
+    ``C`` → add per-row Gaussian noise ``N(0, sigma^2I)`` with ``sigma = z*C`` (gaussian
     mode only). In ``"none"`` mode the input is returned unchanged.
 
     Args:
@@ -265,7 +260,7 @@ def privatize_joint_gradient(
         noise = rng.normal(loc=0.0, scale=sigma, size=(b, d))
         protected = clipped.astype(np.float64) + noise
         # Signal-to-noise: mean post-clip signal energy per row vs noise energy.
-        # noise row energy ≈ d · σ²; signal row energy ≈ mean(post²).
+        # noise row energy ~ d * sigma^2; signal row energy ~ mean(post^2).
         signal_energy = float(np.mean(post**2)) if b else 0.0
         noise_energy = float(d) * sigma * sigma
         snr = signal_energy / noise_energy if noise_energy > 0 else None

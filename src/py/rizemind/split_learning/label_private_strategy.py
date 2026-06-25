@@ -39,8 +39,6 @@ import numpy as np
 from flwr.common import ndarrays_to_parameters, parameters_to_ndarrays
 from flwr.common.logger import log
 from flwr.common.typing import (
-    EvaluateIns,
-    EvaluateRes,
     FitIns,
     FitRes,
     Parameters,
@@ -139,16 +137,26 @@ class LabelPrivateVerticalStrategy(Strategy):
     ) -> list[tuple[ClientProxy, FitIns]]:
         del parameters
         if self._phase == _PHASE_COLLECT:
-            sampled = client_manager.sample(self.num_clients, min_num_clients=self.num_clients)
+            sampled = client_manager.sample(
+                self.num_clients, min_num_clients=self.num_clients
+            )
             if len(sampled) != self.num_clients:
                 raise RuntimeError(
                     f"label-private COLLECT: expected {self.num_clients} clients, "
                     f"got {len(sampled)}"
                 )
-            cfg: dict[str, Scalar] = {LP_PHASE_KEY: _PHASE_COLLECT, "sl_step": self._step_idx}
+            cfg: dict[str, Scalar] = {
+                LP_PHASE_KEY: _PHASE_COLLECT,
+                "sl_step": self._step_idx,
+            }
             self._step_tel = StepTelemetry(sl_step=self._step_idx)
-            log(INFO, "configure_fit r=%d COLLECT sl_step=%d K=%d",
-                server_round, self._step_idx, self.num_clients)
+            log(
+                INFO,
+                "configure_fit r=%d COLLECT sl_step=%d K=%d",
+                server_round,
+                self._step_idx,
+                self.num_clients,
+            )
             return [(c, FitIns(_EMPTY, cfg)) for c in sampled]
 
         if self._phase == _PHASE_COMPUTE:
@@ -181,11 +189,17 @@ class LabelPrivateVerticalStrategy(Strategy):
                 "do_eval": do_eval,
             }
             if self._step_tel is not None:
-                # coordinator -> label holder representation payload
-                self._step_tel.add_time("_repr_bytes_marker", 0.0)
-                self._repr_bytes = int(sum(a.nbytes for a in arrays))
-            log(INFO, "configure_fit r=%d COMPUTE -> label holder pid=%d do_eval=%s",
-                server_round, self.label_holder_pid, do_eval)
+                # coordinator -> label holder representation downlink
+                self._step_tel.add_routing(
+                    "repr_downlink", int(sum(a.nbytes for a in arrays))
+                )
+            log(
+                INFO,
+                "configure_fit r=%d COMPUTE -> label holder pid=%d do_eval=%s",
+                server_round,
+                self.label_holder_pid,
+                do_eval,
+            )
             return [(holder, FitIns(params, cfg))]
 
         # DISTRIBUTE
@@ -194,9 +208,15 @@ class LabelPrivateVerticalStrategy(Strategy):
         for cid, grad in self._grad_by_cid.items():
             client = available.get(cid)
             if client is not None:
-                instructions.append((client, FitIns(grad, {LP_PHASE_KEY: _PHASE_DISTRIBUTE})))
-        log(INFO, "configure_fit r=%d DISTRIBUTE -> %d parties", server_round,
-            len(instructions))
+                instructions.append(
+                    (client, FitIns(grad, {LP_PHASE_KEY: _PHASE_DISTRIBUTE}))
+                )
+        log(
+            INFO,
+            "configure_fit r=%d DISTRIBUTE -> %d parties",
+            server_round,
+            len(instructions),
+        )
         return instructions
 
     # ------------------------------------------------------------------
@@ -208,8 +228,12 @@ class LabelPrivateVerticalStrategy(Strategy):
     ) -> tuple[Parameters | None, dict[str, Scalar]]:
         del failures
         if not results:
-            log(WARNING, "aggregate_fit r=%d: no results in phase=%s",
-                server_round, self._phase)
+            log(
+                WARNING,
+                "aggregate_fit r=%d: no results in phase=%s",
+                server_round,
+                self._phase,
+            )
             return _EMPTY, {"train_loss": self._last_train_loss}
 
         if self._phase == _PHASE_COLLECT:
@@ -255,7 +279,9 @@ class LabelPrivateVerticalStrategy(Strategy):
             if self._step_tel is not None:
                 self._step_tel.add_activation(pid, arr)
 
-    def _compute(self, results: list[tuple[ClientProxy, FitRes]], server_round: int) -> None:
+    def _compute(
+        self, results: list[tuple[ClientProxy, FitRes]], server_round: int
+    ) -> None:
         # Exactly one result: from the label holder.
         if len(results) != 1:
             raise ValueError(
@@ -273,32 +299,85 @@ class LabelPrivateVerticalStrategy(Strategy):
         for pid, g in zip(order, grads):
             cid = self._cid_by_pid[pid]
             gp = ndarrays_to_parameters([g])
-            self._grad_by_cid[cid] = Parameters(tensors=gp.tensors, tensor_type=_SL_TENSOR_TYPE)
+            self._grad_by_cid[cid] = Parameters(
+                tensors=gp.tensors, tensor_type=_SL_TENSOR_TYPE
+            )
             if self._step_tel is not None:
+                # DISTRIBUTE downlink (coordinator -> party), accounted now.
                 self._step_tel.add_gradient(pid, g)
+        if self._step_tel is not None:
+            # label holder -> coordinator joint-gradient uplink (LP overhead).
+            # These are the PROTECTED gradients (post clip+noise); no clean copy
+            # is ever produced at or stored by the coordinator.
+            protected_bytes = int(sum(g.nbytes for g in grads))
+            self._step_tel.add_routing("joint_grad_uplink", protected_bytes)
+            if self.telemetry is not None:
+                self.telemetry.cumulative_protected_gradient_bytes += protected_bytes
+        # Record aggregate (non-sensitive) gradient-privacy diagnostics + timing.
+        if self.telemetry is not None:
+            self._record_privacy_telemetry(res.metrics)
         self._last_train_loss = float(res.metrics.get("train_loss", float("nan")))
-        # Aggregate eval metrics (scalars only — no labels/predictions).
+        # Aggregate eval metrics (scalars only — no labels/predictions). The
+        # confusion counts arrive as a JSON string; they are counts, not labels.
         if res.metrics.get("has_eval"):
-            metrics = {
-                k: float(v)
+            eval_metrics = {
+                k: v
                 for k, v in res.metrics.items()
-                if k not in ("train_loss", "has_eval", _PARTITION_ID_KEY)
-                and isinstance(v, (int, float))
+                if k not in ("has_eval", _PARTITION_ID_KEY)
             }
             loss = float(res.metrics.get("val_loss", float("nan")))
-            self._pending_eval = (loss, metrics)
+            numeric = {
+                k: float(v)
+                for k, v in eval_metrics.items()
+                if isinstance(v, (int, float)) and not isinstance(v, bool)
+            }
+            self._pending_eval = (loss, numeric)
             if self.on_metrics is not None:
-                self.on_metrics(server_round, metrics)
+                self.on_metrics(server_round, eval_metrics)
 
-    def _distribute(self, results: list[tuple[ClientProxy, FitRes]], server_round: int) -> None:
+    def _record_privacy_telemetry(self, metrics: dict[str, Scalar]) -> None:
+        """Fold the holder's per-step gradient-privacy diagnostics into telemetry.
+
+        Reads the ``gp_*`` aggregate diagnostics (norm stats, clip fraction,
+        sigma, SNR) and ``lp_*time_s`` timings the label holder attaches to COMPUTE
+        result. Only aggregate scalars are read — never a gradient vector.
+        """
+        assert self.telemetry is not None
+        diag = {
+            k[len("gp_") :]: v
+            for k, v in metrics.items()
+            if isinstance(k, str) and k.startswith("gp_")
+        }
+        if diag:
+            self.telemetry.record_privacy(diag)
+        for k in (
+            "lp_privacy_time_s",
+            "lp_compute_time_s",
+            "lp_attack_total_time_s",
+            "lp_attack_feature_time_s",
+        ):
+            v = metrics.get(k)
+            if isinstance(v, (int, float)) and not isinstance(v, bool):
+                self.telemetry.timings_s[k] = self.telemetry.timings_s.get(
+                    k, 0.0
+                ) + float(v)
+
+    def _distribute(
+        self, results: list[tuple[ClientProxy, FitRes]], server_round: int
+    ) -> None:
         for client, res in results:
             if _PARTITION_ID_KEY not in res.metrics:
-                log(WARNING, "label-private DISTRIBUTE: cid=%s missing partition_id",
-                    client.cid)
+                log(
+                    WARNING,
+                    "label-private DISTRIBUTE: cid=%s missing partition_id",
+                    client.cid,
+                )
                 continue
             pid = int(res.metrics[_PARTITION_ID_KEY])
             if res.parameters.tensors:
-                self._bottom_weights_by_pid[pid] = parameters_to_ndarrays(res.parameters)
+                self._bottom_weights_by_pid[pid] = parameters_to_ndarrays(
+                    res.parameters
+                )
 
     # ------------------------------------------------------------------
     def configure_evaluate(self, server_round, parameters, client_manager):

@@ -179,7 +179,12 @@ def _standardize(train: np.ndarray, *arrays: np.ndarray) -> tuple[np.ndarray, ..
 
 
 def _logreg_fit(
-    x: np.ndarray, y: np.ndarray, *, epochs: int = 300, lr: float = 0.5, l2: float = 1e-3
+    x: np.ndarray,
+    y: np.ndarray,
+    *,
+    epochs: int = 300,
+    lr: float = 0.5,
+    l2: float = 1e-3,
 ) -> np.ndarray:
     """Plain full-batch logistic-regression fit (NumPy). Returns weights w (D+1,)."""
     n, d = x.shape
@@ -200,9 +205,7 @@ def _logreg_score(w: np.ndarray, x: np.ndarray) -> np.ndarray:
     return 1.0 / (1.0 + np.exp(-np.clip(z, -30, 30)))
 
 
-def _attack_a(
-    stats: np.ndarray, y: np.ndarray, split: AttackSplit
-) -> dict:
+def _attack_a(stats: np.ndarray, y: np.ndarray, split: AttackSplit) -> dict:
     """No-training heuristic: pick the best single statistic + threshold on the
     shadow split, evaluate on the eval split. Threshold orientation is chosen
     from shadow data only."""
@@ -221,8 +224,11 @@ def _attack_a(
             cands = np.quantile(col_tr, np.linspace(0.02, 0.98, 64))
         for thr in cands:
             for orient in (1, -1):
-                pred_tr = ((col_tr > thr).astype(int) if orient == 1
-                           else (col_tr <= thr).astype(int))
+                pred_tr = (
+                    (col_tr > thr).astype(int)
+                    if orient == 1
+                    else (col_tr <= thr).astype(int)
+                )
                 # balanced accuracy on the shadow split as the selection score
                 m = _binary_metrics(y_tr, pred_tr, None)["balanced_accuracy"]
                 if best is None or m > best[0]:
@@ -236,8 +242,7 @@ def _attack_a(
         return out
     _score, j, thr, orient = best
     col_te = s_te[:, j]
-    pred_te = ((col_te > thr).astype(int) if orient == 1
-               else (col_te <= thr).astype(int))
+    pred_te = (col_te > thr).astype(int) if orient == 1 else (col_te <= thr).astype(int)
     # Continuous score (oriented) for ROC-AUC.
     score_te = col_te if orient == 1 else -col_te
     out = _binary_metrics(y_te, pred_te, score_te)
@@ -310,9 +315,7 @@ def evaluate_label_inference(
     if g.ndim != 2:
         raise ValueError(f"grad must be 2-D (B, D), got {g.shape}")
     if y.ndim != 1 or y.shape[0] != g.shape[0]:
-        raise ValueError(
-            f"labels must be 1-D of length B={g.shape[0]}, got {y.shape}"
-        )
+        raise ValueError(f"labels must be 1-D of length B={g.shape[0]}, got {y.shape}")
     classes = np.unique(y)
     if not np.all(np.isin(classes, (0, 1))):
         raise ValueError(f"labels must be binary {{0,1}}, got classes {classes}")
