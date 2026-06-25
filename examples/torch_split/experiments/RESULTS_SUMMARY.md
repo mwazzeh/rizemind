@@ -1,16 +1,16 @@
 # Split-Learning Experiments — Results Summary
 
-Framework: **Rizemind** split-learning example (`examples/torch_split`), built on
-Flower. Two datasets / architectures: **MNIST** (2-layer MLP, split at the
-hidden layer) and **CIFAR-10** (small CNN, split after two conv+pool blocks).
+Results from the `examples/torch_split` sweep, over two datasets and
+architectures: MNIST (2-layer MLP, split at the hidden layer) and CIFAR-10
+(small CNN, split after two conv+pool blocks).
 
 ## Protocol
 
-Split learning: the client owns the network *head*, the server owns the *tail*.
-Each training step spans **two Flower rounds** — round 1 the client sends
-activations (+labels) at the cut point; round 2 the server returns the gradient
-and the client finishes backprop. Client head weights are averaged (FedAvg)
-after every backward round; the server keeps a single shared tail.
+The client owns the network head, the server owns the tail. Each training step
+spans two Flower rounds: in round 1 the client sends activations (+labels) at the
+cut point; in round 2 the server returns the gradient and the client finishes
+backprop. Client head weights are averaged (FedAvg) after every backward round,
+and the server keeps a single shared tail.
 
 ## Common settings (held fixed across the sweep)
 
@@ -27,11 +27,11 @@ after every backward round; the server keeps a single shared tail.
 The sweep is one-factor-at-a-time: from the baseline, exactly one of
 {partitioning, client count, learning rate} is varied per run, for each dataset.
 
-> **Note on magnitudes.** Accuracies are intentionally modest: each client
-> trains on only 2000 capped samples for ~2 epochs (64 single-batch steps).
-> The experiments are designed to compare *conditions*, not to reach
-> state-of-the-art accuracy. Single-batch split steps are high-variance, so the
-> "final" column is the mean of the last 5 evaluations; "best" is the peak.
+Accuracies are intentionally modest: each client trains on only 2000 capped
+samples for ~2 epochs (64 single-batch steps). The point is to compare
+conditions, not to chase state-of-the-art accuracy. Single-batch split steps are
+high-variance, so the "final" column is the mean of the last 5 evaluations and
+"best" is the peak.
 
 ## Results
 
@@ -59,24 +59,24 @@ Total sweep wall-clock: ~18.7 minutes (10 runs) on CPU + RTX A4000.
 
 ## Key findings
 
-1. **Split learning trains correctly.** Loss falls and accuracy rises smoothly
-   on both datasets despite the model being partitioned across client/server —
-   the cut-point gradient exchange works.
-2. **Data heterogeneity hurts, monotonically.** IID > Dirichlet α=0.5 >
-   Dirichlet α=0.1 on both datasets. MNIST drops from 0.85 (IID) → 0.72
-   (α=0.5) → 0.57 (α=0.1). The non-IID curves are also visibly noisier.
-3. **Learning rate matters within a fixed budget.** With only ~2 epochs, lr=0.05
+1. Split learning trains correctly. Loss falls and accuracy rises smoothly on
+   both datasets even with the model partitioned across client and server — the
+   cut-point gradient exchange works.
+2. Data heterogeneity hurts, monotonically: IID > Dirichlet α=0.5 > Dirichlet
+   α=0.1 on both datasets. MNIST drops from 0.85 (IID) → 0.72 (α=0.5) → 0.57
+   (α=0.1), and the non-IID curves are visibly noisier.
+3. Learning rate matters within a fixed budget. With only ~2 epochs, lr=0.05
    reaches higher accuracy than lr=0.01 (MNIST 0.89 vs 0.85); on CIFAR it raises
-   the *peak* (0.36 vs 0.33) but is noisier.
-4. **Client count is roughly neutral here.** 2 vs 5 clients gives similar
-   accuracy (each client keeps the same 2000-sample local budget), confirming
+   the peak (0.36 vs 0.33) but is noisier.
+4. Client count is roughly neutral here. 2 vs 5 clients gives similar accuracy
+   (each client keeps the same 2000-sample local budget), which suggests
    head-averaging scales without degrading the IID baseline.
-5. **CIFAR is harder and noisier than MNIST**, as expected for a CNN trained on
+5. CIFAR is harder and noisier than MNIST, as expected for a CNN trained on
    little data with single-batch steps.
 
 ## Split-point analysis (from `analyze.py`)
 
-**MNIST MLP** (batch 32): total 101.8K params, 6.50M FLOPs.
+MNIST MLP (batch 32): total 101.8K params, 6.50M FLOPs.
 
 | Layer | Type | Params | FLOPs | Activation (KB) |
 |---|---|---|---|---|
@@ -87,7 +87,7 @@ Total sweep wall-clock: ~18.7 minutes (10 runs) on CPU + RTX A4000.
 Example cut (after `head_relu`): client does ~98.7% of FLOPs, transfers a
 compact 16 KB activation per 32-image batch.
 
-**CIFAR-10 CNN** (batch 32): total 545.1K params, 392.25M FLOPs.
+CIFAR-10 CNN (batch 32): total 545.1K params, 392.25M FLOPs.
 
 | Layer | Type | Params | FLOPs | Activation (KB) |
 |---|---|---|---|---|

@@ -1,7 +1,7 @@
 # VFL sweep — results summary
 
-One-factor-at-a-time sweep on MNIST around a baseline of **K=2, lr=0.05,
-hidden-dim=64**, 60 Flower rounds (30 SL steps), 4000-sample cap, evaluated on a
+One-factor-at-a-time sweep on MNIST around a baseline of K=2, lr=0.05,
+hidden-dim=64, 60 Flower rounds (30 SL steps), 4000-sample cap, evaluated on a
 2000-image held-out subset. Reproduce with:
 
 ```bash
@@ -9,9 +9,9 @@ uv run python experiments/run_sweep.py
 uv run python experiments/plot_results.py
 ```
 
-Accuracy below is the **mean of the last 5 evaluations** (single-batch split
-steps are high-variance, so the last point alone is noisy). Each run took ~55 s.
-Numbers are from one unseeded run and vary by ±0.02–0.03 between repeats.
+Accuracy below is the mean of the last 5 evaluations — single-batch split steps
+are high-variance, so the last point alone is noisy. Each run took ~55 s. The
+numbers are from one unseeded run and vary by ±0.02–0.03 between repeats.
 
 | Run | K | lr | hidden | Total cut width | Final val_acc (smooth) | Best |
 |-----|---|----|--------|-----------------|------------------------|------|
@@ -31,44 +31,43 @@ Numbers are from one unseeded run and vary by ±0.02–0.03 between repeats.
 
 ## Takeaways
 
-**Cut width (hidden-dim) dominates accuracy.** Widening the per-client
-activation 32 → 64 → 128 lifts accuracy 0.560 → 0.682 → 0.783, monotonically.
-The cut is the representational bottleneck: each bottom MLP must compress its
-strip into `hidden_dim` features before the server sees anything, so this is the
-first knob to turn (at the cost of more bytes on the wire per round).
+Cut width (hidden-dim) dominates accuracy. Widening the per-client activation
+32 → 64 → 128 lifts accuracy 0.560 → 0.682 → 0.783, monotonically. The cut is the
+representational bottleneck: each bottom MLP has to compress its strip into
+`hidden_dim` features before the server sees anything, so this is the first knob
+to turn — at the cost of more bytes on the wire per round.
 
-**Party count: the two sweeps must be read separately — they say different
-things.** The number of parties (K) is entangled with total cut representation
-capacity, because the server tail input is the concatenation of all K
-activations (`K * hidden_dim`). We therefore ran two K-sweeps:
+Party count needs the two sweeps read separately, because they say different
+things. The number of parties (K) is entangled with total cut capacity: the
+server tail input is the concatenation of all K activations (`K * hidden_dim`).
+So we ran two K-sweeps:
 
-* *Fixed per-party `hidden_dim=64`* (`mnist_k4`, `mnist_k7`): total cut width
-  **grows** with K (128 → 256 → 448) and accuracy rises (0.682 → 0.743 →
-  0.762). This is **capacity-confounded** — more parties also means a wider
-  server input — so it does **not** show that more parties help.
+* Fixed per-party `hidden_dim=64` (`mnist_k4`, `mnist_k7`): total cut width grows
+  with K (128 → 256 → 448) and accuracy rises (0.682 → 0.743 → 0.762). This is
+  capacity-confounded — more parties also means a wider server input — so it does
+  not show that more parties help.
 
-* *Fixed total cut width ~128* (`mnist_ftw_k4`, `mnist_ftw_k7`): `hidden_dim` is
+* Fixed total cut width ~128 (`mnist_ftw_k4`, `mnist_ftw_k7`): `hidden_dim` is
   shrunk as K grows (64 → 32 → 18) to hold `K * hidden_dim` roughly constant.
-  Here accuracy **drops** with K (0.682 → 0.616 → 0.497).
+  Here accuracy drops with K (0.682 → 0.616 → 0.497).
 
-What this supports — and what it does **not**:
+What this supports, and what it doesn't:
 
-* Increasing K did **not** break the VFL pipeline: all party counts trained
+* Increasing K did not break the VFL pipeline: every party count trained
   end-to-end and learned.
-* Under the default *fixed per-party* setting, performance stayed stable or
-  improved as K grew.
-* This does **not** prove that more VFL parties improve accuracy. The gain in
-  the first sweep is consistent with simply having a larger total cut
-  representation, not with the party count itself.
-* When total cut capacity is held fixed (second sweep), more parties is
-  **worse** here — splitting the same ~128-dim budget across more, narrower
-  strips (each with a tiny 18-dim bottleneck at K=7) hurts. On MNIST the columns
-  are also highly correlated, so finer vertical splits add little independent
-  signal.
+* Under the default fixed per-party setting, performance held steady or improved
+  as K grew.
+* That does not prove more VFL parties improve accuracy. The gain in the first
+  sweep is consistent with simply having a larger total cut representation, not
+  with the party count itself.
+* When total cut capacity is held fixed (second sweep), more parties is worse
+  here — splitting the same ~128-dim budget across more, narrower strips (down to
+  a tiny 18-dim bottleneck at K=7) hurts. MNIST columns are also highly
+  correlated, so finer vertical splits add little independent signal.
 
-**Learning rate: 0.05 is in the right range for this budget.** lr=0.02 is too
-slow to converge in 30 steps (0.454); lr=0.05 (0.682) and lr=0.1 (0.673, but
-noisier — best 0.797) are comparable.
+Learning rate: 0.05 sits in the right range for this budget. lr=0.02 is too slow
+to converge in 30 steps (0.454); lr=0.05 (0.682) and lr=0.1 (0.673, but noisier —
+best 0.797) are comparable.
 
 ## Caveats
 
@@ -83,8 +82,8 @@ noisier — best 0.797) are comparable.
 ## Tabular VFL — UCI Adult (reference, not swept)
 
 The sweep above is MNIST only. The `dataset="adult"` task (K=2: demographic vs.
-work/financial columns, label at the server) is not part of the sweep, but for
-reference a single run:
+work/financial columns, label at the server) is not part of the sweep, but as a
+reference point, a single run:
 
 ```bash
 uv run -- flwr run . --run-config 'dataset="adult" num-server-rounds=300 \
