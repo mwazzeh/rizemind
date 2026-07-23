@@ -39,8 +39,6 @@ import numpy as np
 from flwr.common import ndarrays_to_parameters, parameters_to_ndarrays
 from flwr.common.logger import log
 from flwr.common.typing import (
-    EvaluateIns,
-    EvaluateRes,
     FitIns,
     FitRes,
     Parameters,
@@ -139,16 +137,26 @@ class LabelPrivateVerticalStrategy(Strategy):
     ) -> list[tuple[ClientProxy, FitIns]]:
         del parameters
         if self._phase == _PHASE_COLLECT:
-            sampled = client_manager.sample(self.num_clients, min_num_clients=self.num_clients)
+            sampled = client_manager.sample(
+                self.num_clients, min_num_clients=self.num_clients
+            )
             if len(sampled) != self.num_clients:
                 raise RuntimeError(
                     f"label-private COLLECT: expected {self.num_clients} clients, "
                     f"got {len(sampled)}"
                 )
-            cfg: dict[str, Scalar] = {LP_PHASE_KEY: _PHASE_COLLECT, "sl_step": self._step_idx}
+            cfg: dict[str, Scalar] = {
+                LP_PHASE_KEY: _PHASE_COLLECT,
+                "sl_step": self._step_idx,
+            }
             self._step_tel = StepTelemetry(sl_step=self._step_idx)
-            log(INFO, "configure_fit r=%d COLLECT sl_step=%d K=%d",
-                server_round, self._step_idx, self.num_clients)
+            log(
+                INFO,
+                "configure_fit r=%d COLLECT sl_step=%d K=%d",
+                server_round,
+                self._step_idx,
+                self.num_clients,
+            )
             return [(c, FitIns(_EMPTY, cfg)) for c in sampled]
 
         if self._phase == _PHASE_COMPUTE:
@@ -184,8 +192,13 @@ class LabelPrivateVerticalStrategy(Strategy):
                 # coordinator -> label holder representation payload
                 self._step_tel.add_time("_repr_bytes_marker", 0.0)
                 self._repr_bytes = int(sum(a.nbytes for a in arrays))
-            log(INFO, "configure_fit r=%d COMPUTE -> label holder pid=%d do_eval=%s",
-                server_round, self.label_holder_pid, do_eval)
+            log(
+                INFO,
+                "configure_fit r=%d COMPUTE -> label holder pid=%d do_eval=%s",
+                server_round,
+                self.label_holder_pid,
+                do_eval,
+            )
             return [(holder, FitIns(params, cfg))]
 
         # DISTRIBUTE
@@ -194,9 +207,15 @@ class LabelPrivateVerticalStrategy(Strategy):
         for cid, grad in self._grad_by_cid.items():
             client = available.get(cid)
             if client is not None:
-                instructions.append((client, FitIns(grad, {LP_PHASE_KEY: _PHASE_DISTRIBUTE})))
-        log(INFO, "configure_fit r=%d DISTRIBUTE -> %d parties", server_round,
-            len(instructions))
+                instructions.append(
+                    (client, FitIns(grad, {LP_PHASE_KEY: _PHASE_DISTRIBUTE}))
+                )
+        log(
+            INFO,
+            "configure_fit r=%d DISTRIBUTE -> %d parties",
+            server_round,
+            len(instructions),
+        )
         return instructions
 
     # ------------------------------------------------------------------
@@ -208,8 +227,12 @@ class LabelPrivateVerticalStrategy(Strategy):
     ) -> tuple[Parameters | None, dict[str, Scalar]]:
         del failures
         if not results:
-            log(WARNING, "aggregate_fit r=%d: no results in phase=%s",
-                server_round, self._phase)
+            log(
+                WARNING,
+                "aggregate_fit r=%d: no results in phase=%s",
+                server_round,
+                self._phase,
+            )
             return _EMPTY, {"train_loss": self._last_train_loss}
 
         if self._phase == _PHASE_COLLECT:
@@ -255,7 +278,9 @@ class LabelPrivateVerticalStrategy(Strategy):
             if self._step_tel is not None:
                 self._step_tel.add_activation(pid, arr)
 
-    def _compute(self, results: list[tuple[ClientProxy, FitRes]], server_round: int) -> None:
+    def _compute(
+        self, results: list[tuple[ClientProxy, FitRes]], server_round: int
+    ) -> None:
         # Exactly one result: from the label holder.
         if len(results) != 1:
             raise ValueError(
@@ -273,7 +298,9 @@ class LabelPrivateVerticalStrategy(Strategy):
         for pid, g in zip(order, grads):
             cid = self._cid_by_pid[pid]
             gp = ndarrays_to_parameters([g])
-            self._grad_by_cid[cid] = Parameters(tensors=gp.tensors, tensor_type=_SL_TENSOR_TYPE)
+            self._grad_by_cid[cid] = Parameters(
+                tensors=gp.tensors, tensor_type=_SL_TENSOR_TYPE
+            )
             if self._step_tel is not None:
                 self._step_tel.add_gradient(pid, g)
         self._last_train_loss = float(res.metrics.get("train_loss", float("nan")))
@@ -290,15 +317,22 @@ class LabelPrivateVerticalStrategy(Strategy):
             if self.on_metrics is not None:
                 self.on_metrics(server_round, metrics)
 
-    def _distribute(self, results: list[tuple[ClientProxy, FitRes]], server_round: int) -> None:
+    def _distribute(
+        self, results: list[tuple[ClientProxy, FitRes]], server_round: int
+    ) -> None:
         for client, res in results:
             if _PARTITION_ID_KEY not in res.metrics:
-                log(WARNING, "label-private DISTRIBUTE: cid=%s missing partition_id",
-                    client.cid)
+                log(
+                    WARNING,
+                    "label-private DISTRIBUTE: cid=%s missing partition_id",
+                    client.cid,
+                )
                 continue
             pid = int(res.metrics[_PARTITION_ID_KEY])
             if res.parameters.tensors:
-                self._bottom_weights_by_pid[pid] = parameters_to_ndarrays(res.parameters)
+                self._bottom_weights_by_pid[pid] = parameters_to_ndarrays(
+                    res.parameters
+                )
 
     # ------------------------------------------------------------------
     def configure_evaluate(self, server_round, parameters, client_manager):

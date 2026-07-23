@@ -31,7 +31,7 @@ MAX_TRAIN_SAMPLES = 2000
 TARGET_EPOCHS = 2.0
 BATCH_SIZE = 64
 PARTITION_SEED = 42
-EVAL_EVERY = 2          # record metrics once per SL step (every 2 Flower rounds)
+EVAL_EVERY = 2  # record metrics once per SL step (every 2 Flower rounds)
 EVAL_MAX_SAMPLES = 2000  # held-out test subset for fast, frequent evaluation
 
 HERE = Path(__file__).resolve().parent
@@ -44,9 +44,9 @@ class Run:
     """One sweep configuration."""
 
     id: str
-    dataset: str            # "mnist" | "cifar10"
-    label: str              # human-readable label for plots
-    group: str              # comparison group this run belongs to
+    dataset: str  # "mnist" | "cifar10"
+    label: str  # human-readable label for plots
+    group: str  # comparison group this run belongs to
     partitioner: str = "iid"
     dirichlet_alpha: float = 0.5
     clients: int = 2
@@ -55,10 +55,10 @@ class Run:
     status: str = "pending"
     wall_seconds: float = 0.0
     rounds: int = 0
-    final_val_accuracy: float = float("nan")       # last recorded eval point
+    final_val_accuracy: float = float("nan")  # last recorded eval point
     final_val_loss: float = float("nan")
     final_val_accuracy_smooth: float = float("nan")  # mean of last 5 eval points
-    best_val_accuracy: float = float("nan")          # max over all eval points
+    best_val_accuracy: float = float("nan")  # max over all eval points
     extra: dict = field(default_factory=dict)
 
     @property
@@ -94,26 +94,55 @@ def build_matrix() -> list[Run]:
         pfx = "mnist" if ds == "mnist" else "cifar"
         runs += [
             # Baseline + partitioning sweep
-            Run(f"{pfx}_iid", ds, f"{tag} IID", "partitioning",
-                partitioner="iid"),
-            Run(f"{pfx}_dir_a0.5", ds, f"{tag} Dirichlet α=0.5", "partitioning",  # noqa: RUF001
-                partitioner="dirichlet", dirichlet_alpha=0.5),
-            Run(f"{pfx}_dir_a0.1", ds, f"{tag} Dirichlet α=0.1", "partitioning",  # noqa: RUF001
-                partitioner="dirichlet", dirichlet_alpha=0.1),
+            Run(f"{pfx}_iid", ds, f"{tag} IID", "partitioning", partitioner="iid"),
+            Run(
+                f"{pfx}_dir_a0.5",
+                ds,
+                f"{tag} Dirichlet α=0.5",
+                "partitioning",  # noqa: RUF001
+                partitioner="dirichlet",
+                dirichlet_alpha=0.5,
+            ),
+            Run(
+                f"{pfx}_dir_a0.1",
+                ds,
+                f"{tag} Dirichlet α=0.1",
+                "partitioning",  # noqa: RUF001
+                partitioner="dirichlet",
+                dirichlet_alpha=0.1,
+            ),
             # Client-count sweep (baseline IID, 5 clients)
-            Run(f"{pfx}_iid_5cl", ds, f"{tag} IID 5 clients", "clients",
-                partitioner="iid", clients=5),
+            Run(
+                f"{pfx}_iid_5cl",
+                ds,
+                f"{tag} IID 5 clients",
+                "clients",
+                partitioner="iid",
+                clients=5,
+            ),
             # Learning-rate sweep (baseline IID, lr=0.05)
-            Run(f"{pfx}_iid_lr0.05", ds, f"{tag} IID lr=0.05", "lr",
-                partitioner="iid", learning_rate=0.05),
+            Run(
+                f"{pfx}_iid_lr0.05",
+                ds,
+                f"{tag} IID lr=0.05",
+                "lr",
+                partitioner="iid",
+                learning_rate=0.05,
+            ),
         ]
     return runs
 
 
 def execute(run: Run, dry_run: bool) -> None:
     cmd = [
-        "uv", "run", "flwr", "run", ".", run.federation,
-        "--run-config", run.run_config(),
+        "uv",
+        "run",
+        "flwr",
+        "run",
+        ".",
+        run.federation,
+        "--run-config",
+        run.run_config(),
     ]
     print(f"\n=== {run.id} ({run.label}) ===")
     print("  " + " ".join(cmd[:6]) + f" --run-config '{run.run_config()}'")
@@ -164,7 +193,9 @@ def _load_jsonl(path: Path) -> list[dict]:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--only", nargs="*", help="Run only these run ids.")
-    parser.add_argument("--dry-run", action="store_true", help="Print commands, do not run.")
+    parser.add_argument(
+        "--dry-run", action="store_true", help="Print commands, do not run."
+    )
     args = parser.parse_args()
 
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)

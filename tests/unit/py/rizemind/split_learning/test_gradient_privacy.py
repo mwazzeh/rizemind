@@ -8,7 +8,6 @@ aggregate (non-sensitive) diagnostics.
 
 import numpy as np
 import pytest
-
 from rizemind.split_learning.gradient_privacy import (
     GradientPrivacyConfig,
     clip_rows,
@@ -109,7 +108,8 @@ def test_zero_noise_gaussian_equals_clip():
         g, GradientPrivacyConfig(mode="clip", clip_norm=1.0)
     )
     gauss0_out, _ = privatize_joint_gradient(
-        g, GradientPrivacyConfig(mode="gaussian", clip_norm=1.0, noise_multiplier=0.0),
+        g,
+        GradientPrivacyConfig(mode="gaussian", clip_norm=1.0, noise_multiplier=0.0),
         research_seed=0,
     )
     assert np.allclose(clip_out, gauss0_out)
@@ -170,8 +170,13 @@ def test_diagnostics_are_aggregate_only():
     # Every diagnostic value is a scalar / None / str — never an array.
     for v in diag.values():
         assert v is None or np.isscalar(v) or isinstance(v, str)
-    assert {"pre_clip_norm_mean", "post_clip_norm_mean", "clip_fraction",
-            "noise_std", "snr"} <= set(diag)
+    assert {
+        "pre_clip_norm_mean",
+        "post_clip_norm_mean",
+        "clip_fraction",
+        "noise_std",
+        "snr",
+    } <= set(diag)
 
 
 def test_config_as_dict_no_formal_dp_claim():

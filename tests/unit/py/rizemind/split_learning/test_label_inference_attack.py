@@ -7,7 +7,6 @@ majority/chance references, and that labels are never echoed as features.
 
 import numpy as np
 import pytest
-
 from rizemind.split_learning.label_inference_attack import (
     AttackSplit,
     evaluate_label_inference,

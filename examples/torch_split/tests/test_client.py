@@ -75,5 +75,9 @@ def test_evaluate_uses_tail_weights_from_config_and_restores_local_models():
     assert num_examples == 2
     assert loss < 0.2
     assert metrics["accuracy"] == 1.0
-    assert all(np.array_equal(a, b) for a, b in zip(get_weights(client.head), original_head))
-    assert all(np.array_equal(a, b) for a, b in zip(get_weights(client.tail), original_tail))
+    assert all(
+        np.array_equal(a, b) for a, b in zip(get_weights(client.head), original_head)
+    )
+    assert all(
+        np.array_equal(a, b) for a, b in zip(get_weights(client.tail), original_tail)
+    )

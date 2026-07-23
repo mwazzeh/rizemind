@@ -34,10 +34,10 @@ from pathlib import Path
 
 # Shared budget so every run does the same number of SL steps and sees the same
 # amount of data — only the swept factor changes between runs.
-NUM_SERVER_ROUNDS = 60   # 30 SL steps (2 Flower rounds per step)
+NUM_SERVER_ROUNDS = 60  # 30 SL steps (2 Flower rounds per step)
 MAX_TRAIN_SAMPLES = 4000
 BATCH_SIZE = 64
-EVAL_EVERY = 2           # record metrics once per SL step (every 2 Flower rounds)
+EVAL_EVERY = 2  # record metrics once per SL step (every 2 Flower rounds)
 EVAL_MAX_SAMPLES = 2000  # held-out test subset for fast, frequent evaluation
 
 HERE = Path(__file__).resolve().parent
@@ -50,9 +50,9 @@ class Run:
     """One sweep configuration."""
 
     id: str
-    label: str              # human-readable label for plots
-    group: str              # comparison group this run belongs to
-    clients: int = 2        # K — number of vertical parties
+    label: str  # human-readable label for plots
+    group: str  # comparison group this run belongs to
+    clients: int = 2  # K — number of vertical parties
     learning_rate: float = 0.05
     hidden_dim: int = 64
     dataset: str = "mnist"
@@ -60,10 +60,10 @@ class Run:
     status: str = "pending"
     wall_seconds: float = 0.0
     rounds: int = 0
-    final_val_accuracy: float = float("nan")         # last recorded eval point
+    final_val_accuracy: float = float("nan")  # last recorded eval point
     final_val_loss: float = float("nan")
     final_val_accuracy_smooth: float = float("nan")  # mean of last 5 eval points
-    best_val_accuracy: float = float("nan")          # max over all eval points
+    best_val_accuracy: float = float("nan")  # max over all eval points
     extra: dict = field(default_factory=dict)
 
     @property
@@ -107,10 +107,20 @@ def build_matrix() -> list[Run]:
         # shrunk as K grows so K*hidden_dim stays roughly constant, isolating
         # the effect of party count from server-input width. K=2 anchor is the
         # baseline run above (K=2, hidden=64 → 128).
-        Run("mnist_ftw_k4", "K=4, hidden=32 (128 total)", "clients_ftw",
-            clients=4, hidden_dim=32),
-        Run("mnist_ftw_k7", "K=7, hidden=18 (126 total)", "clients_ftw",
-            clients=7, hidden_dim=18),
+        Run(
+            "mnist_ftw_k4",
+            "K=4, hidden=32 (128 total)",
+            "clients_ftw",
+            clients=4,
+            hidden_dim=32,
+        ),
+        Run(
+            "mnist_ftw_k7",
+            "K=7, hidden=18 (126 total)",
+            "clients_ftw",
+            clients=7,
+            hidden_dim=18,
+        ),
         # Learning-rate sweep
         Run("mnist_lr0.02", "K=2 lr=0.02", "lr", learning_rate=0.02),
         Run("mnist_lr0.1", "K=2 lr=0.1", "lr", learning_rate=0.1),
@@ -122,8 +132,14 @@ def build_matrix() -> list[Run]:
 
 def execute(run: Run, dry_run: bool) -> None:
     cmd = [
-        "uv", "run", "flwr", "run", ".", run.federation,
-        "--run-config", run.run_config(),
+        "uv",
+        "run",
+        "flwr",
+        "run",
+        ".",
+        run.federation,
+        "--run-config",
+        run.run_config(),
     ]
     print(f"\n=== {run.id} ({run.label}) ===")
     print("  " + " ".join(cmd[:6]) + f" --run-config '{run.run_config()}'")

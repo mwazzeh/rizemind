@@ -127,9 +127,7 @@ def get_dataset_spec(name: str) -> DatasetSpec:
     """
     key = name.strip().lower()
     if key not in _DATASETS:
-        raise ValueError(
-            f"dataset must be one of {sorted(_DATASETS)}, got {name!r}"
-        )
+        raise ValueError(f"dataset must be one of {sorted(_DATASETS)}, got {name!r}")
     return _DATASETS[key]
 
 
@@ -163,9 +161,7 @@ def partition_config_from_run_config(
     """Build a partition config from Flower run config values."""
     kind = str(run_config.get("partitioner", "iid")).strip().lower()
     if kind not in {"iid", "dirichlet"}:
-        raise ValueError(
-            f"partitioner must be 'iid' or 'dirichlet', got {kind!r}"
-        )
+        raise ValueError(f"partitioner must be 'iid' or 'dirichlet', got {kind!r}")
 
     return PartitionConfig(
         kind=kind,
@@ -307,7 +303,9 @@ class CachedTrainPartition:
             self._cached_epoch = epoch
         return self._cached_indices
 
-    def get_batch(self, batch_idx: int, epoch: int) -> tuple[torch.Tensor, torch.Tensor]:
+    def get_batch(
+        self, batch_idx: int, epoch: int
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """Return the batch for ``(epoch, batch_idx)`` using cached tensors."""
         if not 0 <= batch_idx < self.num_batches:
             raise IndexError(
@@ -486,9 +484,7 @@ def num_server_rounds_for_target_epochs(
     if target_epochs <= 0.0:
         raise ValueError(f"target_epochs must be > 0, got {target_epochs}")
     if num_rounds_per_step < 1:
-        raise ValueError(
-            f"num_rounds_per_step must be >= 1, got {num_rounds_per_step}"
-        )
+        raise ValueError(f"num_rounds_per_step must be >= 1, got {num_rounds_per_step}")
     if not train_batch_counts:
         raise ValueError("train_batch_counts must not be empty")
 
@@ -525,7 +521,9 @@ def make_server_eval_loader(
     if max_samples and max_samples > 0 and len(test_partition) > max_samples:
         test_partition = test_partition.select(range(max_samples))
     test_partition = test_partition.with_transform(_make_apply_transforms(spec))
-    return DataLoader(cast(Dataset, test_partition), batch_size=batch_size, shuffle=False)
+    return DataLoader(
+        cast(Dataset, test_partition), batch_size=batch_size, shuffle=False
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -590,7 +588,10 @@ class ConvServerTail(nn.Module):
     """
 
     def __init__(
-        self, num_classes: int = 10, feature_dim: int = 64 * 8 * 8, hidden_dim: int = 128
+        self,
+        num_classes: int = 10,
+        feature_dim: int = 64 * 8 * 8,
+        hidden_dim: int = 128,
     ) -> None:
         super().__init__()
         self.fc1 = nn.Linear(feature_dim, hidden_dim)
@@ -659,6 +660,7 @@ def serialize_ndarrays_to_bytes(arrays: Sequence[np.ndarray]) -> bytes:
 
 def deserialize_ndarrays_from_bytes(payload: bytes) -> list[np.ndarray]:
     """Deserialize ndarrays produced by ``serialize_ndarrays_to_bytes``."""
+
     def key_index(name: str) -> int:
         return int(name.split("_")[1])
 

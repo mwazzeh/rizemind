@@ -24,8 +24,14 @@ PLOTS_DIR = HERE / "plots"
 
 # Consistent colors per run within a figure.
 _PALETTE = [
-    "#4e79a7", "#f28e2b", "#e15759", "#76b7b2",
-    "#59a14f", "#edc948", "#b07aa1", "#ff9da7",
+    "#4e79a7",
+    "#f28e2b",
+    "#e15759",
+    "#76b7b2",
+    "#59a14f",
+    "#edc948",
+    "#b07aa1",
+    "#ff9da7",
 ]
 
 # Stable color per comparison group for the summary bar chart.
@@ -73,8 +79,13 @@ def _plot_group(
             continue
         xs, ys = _series(records, metric)
         ax.plot(
-            xs, ys, marker="o", markersize=3, linewidth=1.6,
-            color=_PALETTE[i % len(_PALETTE)], label=_label_for(manifest, rid),
+            xs,
+            ys,
+            marker="o",
+            markersize=3,
+            linewidth=1.6,
+            color=_PALETTE[i % len(_PALETTE)],
+            label=_label_for(manifest, rid),
         )
         drawn = True
 
@@ -113,8 +124,13 @@ def _plot_final_accuracy_bar(manifest: dict, out_path: Path) -> None:
     ax.set_title("VFL final accuracy by configuration", fontweight="bold")
     ax.grid(axis="x", alpha=0.3)
     for bar, acc in zip(bars, accs):
-        ax.text(acc + 0.01, bar.get_y() + bar.get_height() / 2,
-                f"{acc:.3f}", va="center", fontsize=8)
+        ax.text(
+            acc + 0.01,
+            bar.get_y() + bar.get_height() / 2,
+            f"{acc:.3f}",
+            va="center",
+            fontsize=8,
+        )
     handles = [
         plt.Rectangle((0, 0), 1, 1, fc=color, label=group)
         for group, color in _GROUP_COLORS.items()
@@ -130,18 +146,28 @@ def _plot_final_accuracy_bar(manifest: dict, out_path: Path) -> None:
 # The two party-count charts are kept SEPARATE on purpose — merging them would
 # conflate "more parties" with "wider server input".
 _COMPARISONS = [
-    ("k_sweep_growing_width",
-     "VFL — party count, FIXED per-party hidden=64\n"
-     "(total cut width = K*64 GROWS with K — capacity-confounded)",
-     ["mnist_k2", "mnist_k4", "mnist_k7"]),
-    ("k_sweep_fixed_total_width",
-     "VFL — party count at ~FIXED total cut width (~128)\n"
-     "(hidden_dim shrunk as K grows — isolates party count)",
-     ["mnist_k2", "mnist_ftw_k4", "mnist_ftw_k7"]),
-    ("lr_sweep", "VFL — effect of learning rate",
-     ["mnist_lr0.02", "mnist_k2", "mnist_lr0.1"]),
-    ("hidden_sweep", "VFL — effect of cut width (hidden-dim)",
-     ["mnist_h32", "mnist_k2", "mnist_h128"]),
+    (
+        "k_sweep_growing_width",
+        "VFL — party count, FIXED per-party hidden=64\n"
+        "(total cut width = K*64 GROWS with K — capacity-confounded)",
+        ["mnist_k2", "mnist_k4", "mnist_k7"],
+    ),
+    (
+        "k_sweep_fixed_total_width",
+        "VFL — party count at ~FIXED total cut width (~128)\n"
+        "(hidden_dim shrunk as K grows — isolates party count)",
+        ["mnist_k2", "mnist_ftw_k4", "mnist_ftw_k7"],
+    ),
+    (
+        "lr_sweep",
+        "VFL — effect of learning rate",
+        ["mnist_lr0.02", "mnist_k2", "mnist_lr0.1"],
+    ),
+    (
+        "hidden_sweep",
+        "VFL — effect of cut width (hidden-dim)",
+        ["mnist_h32", "mnist_k2", "mnist_h128"],
+    ),
 ]
 
 
@@ -154,10 +180,22 @@ def main() -> None:
 
     print("Generating comparison plots...")
     for stem, title, ids in _COMPARISONS:
-        _plot_group(manifest, ids, "val_accuracy", "Validation accuracy",
-                    f"{title}\n(validation accuracy)", PLOTS_DIR / f"{stem}_acc.png")
-        _plot_group(manifest, ids, "val_loss", "Validation loss",
-                    f"{title}\n(validation loss)", PLOTS_DIR / f"{stem}_loss.png")
+        _plot_group(
+            manifest,
+            ids,
+            "val_accuracy",
+            "Validation accuracy",
+            f"{title}\n(validation accuracy)",
+            PLOTS_DIR / f"{stem}_acc.png",
+        )
+        _plot_group(
+            manifest,
+            ids,
+            "val_loss",
+            "Validation loss",
+            f"{title}\n(validation loss)",
+            PLOTS_DIR / f"{stem}_loss.png",
+        )
 
     print("Generating summary bar chart...")
     _plot_final_accuracy_bar(manifest, PLOTS_DIR / "final_accuracy_summary.png")

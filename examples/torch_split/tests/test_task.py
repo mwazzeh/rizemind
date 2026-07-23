@@ -21,9 +21,13 @@ def _expected_order(size: int, seed: int) -> torch.Tensor:
 def test_cached_train_partition_batches_cover_full_epoch():
     images = torch.arange(20, dtype=torch.float32).reshape(5, 4)
     labels = torch.arange(5, dtype=torch.long)
-    partition = CachedTrainPartition(images=images, labels=labels, batch_size=2, shuffle_seed=11)
+    partition = CachedTrainPartition(
+        images=images, labels=labels, batch_size=2, shuffle_seed=11
+    )
 
-    batches = [partition.get_batch(batch_idx=i, epoch=0) for i in range(partition.num_batches)]
+    batches = [
+        partition.get_batch(batch_idx=i, epoch=0) for i in range(partition.num_batches)
+    ]
     epoch_labels = torch.cat([batch_labels for _, batch_labels in batches])
 
     assert partition.num_batches == 3
@@ -34,13 +38,21 @@ def test_cached_train_partition_batches_cover_full_epoch():
 def test_cached_train_partition_reshuffles_between_epochs():
     images = torch.arange(24, dtype=torch.float32).reshape(6, 4)
     labels = torch.arange(6, dtype=torch.long)
-    partition = CachedTrainPartition(images=images, labels=labels, batch_size=2, shuffle_seed=23)
+    partition = CachedTrainPartition(
+        images=images, labels=labels, batch_size=2, shuffle_seed=23
+    )
 
     epoch0_labels = torch.cat(
-        [partition.get_batch(batch_idx=i, epoch=0)[1] for i in range(partition.num_batches)]
+        [
+            partition.get_batch(batch_idx=i, epoch=0)[1]
+            for i in range(partition.num_batches)
+        ]
     )
     epoch1_labels = torch.cat(
-        [partition.get_batch(batch_idx=i, epoch=1)[1] for i in range(partition.num_batches)]
+        [
+            partition.get_batch(batch_idx=i, epoch=1)[1]
+            for i in range(partition.num_batches)
+        ]
     )
 
     assert torch.equal(epoch0_labels, labels[_expected_order(size=6, seed=23)])
@@ -49,13 +61,15 @@ def test_cached_train_partition_reshuffles_between_epochs():
 
 
 def test_partition_config_from_run_config_supports_dirichlet():
-    config = partition_config_from_run_config({
-        "partitioner": "dirichlet",
-        "partition-seed": 7,
-        "dirichlet-alpha": 0.3,
-        "dirichlet-min-partition-size": 12,
-        "dirichlet-self-balancing": True,
-    })
+    config = partition_config_from_run_config(
+        {
+            "partitioner": "dirichlet",
+            "partition-seed": 7,
+            "dirichlet-alpha": 0.3,
+            "dirichlet-min-partition-size": 12,
+            "dirichlet-self-balancing": True,
+        }
+    )
 
     assert config == PartitionConfig(
         kind="dirichlet",
@@ -113,10 +127,12 @@ def test_build_split_models_cifar_cnn_shapes_and_backward():
 
 
 def test_ndarray_bytes_round_trip_preserves_order():
-    payload = serialize_ndarrays_to_bytes([
-        torch.arange(6, dtype=torch.float32).reshape(2, 3).numpy(),
-        torch.tensor([5, 4, 3], dtype=torch.int64).numpy(),
-    ])
+    payload = serialize_ndarrays_to_bytes(
+        [
+            torch.arange(6, dtype=torch.float32).reshape(2, 3).numpy(),
+            torch.tensor([5, 4, 3], dtype=torch.int64).numpy(),
+        ]
+    )
 
     restored = deserialize_ndarrays_from_bytes(payload)
 

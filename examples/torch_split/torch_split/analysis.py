@@ -11,10 +11,10 @@ From Python::
     sample = torch.randn(32, 16)
 
     profiler = LayerProfiler(model, sample)
-    stats = profiler.profile()                   # inference metrics
+    stats = profiler.profile()  # inference metrics
 
     trainer = TrainingProfiler(model, sample, stats)
-    train_stats = trainer.profile()              # backward + memory metrics
+    train_stats = trainer.profile()  # backward + memory metrics
 
 See ``analyze.py`` in the torch_split example root for the full CLI.
 
@@ -85,7 +85,7 @@ class LayerStats:
     macs: int
     activation_bytes: int
     cpu_time_us: float
-    gpu_time_us: float        # 0.0 if GPU timing not collected
+    gpu_time_us: float  # 0.0 if GPU timing not collected
 
     # Derived — filled by _compute_cumulative
     cumulative_flops: int = 0
@@ -121,19 +121,19 @@ class TrainingLayerStats:
     cumulative_bwd_gpu_us: float = 0.0
 
     # Per-layer memory
-    param_kb: float = 0.0       # parameter storage
-    grad_kb: float = 0.0        # gradient buffer (= param_kb for float32)
-    opt_sgd_kb: float = 0.0     # SGD-with-momentum state (1x params)
-    opt_adam_kb: float = 0.0    # Adam state (2x params)
-    act_cache_kb: float = 0.0   # activation cached for backprop
+    param_kb: float = 0.0  # parameter storage
+    grad_kb: float = 0.0  # gradient buffer (= param_kb for float32)
+    opt_sgd_kb: float = 0.0  # SGD-with-momentum state (1x params)
+    opt_adam_kb: float = 0.0  # Adam state (2x params)
+    act_cache_kb: float = 0.0  # activation cached for backprop
 
     # Cumulative memory if cut here (client owns 0..idx)
     total_param_kb: float = 0.0
     total_grad_kb: float = 0.0
     total_opt_adam_kb: float = 0.0
     total_act_cache_kb: float = 0.0
-    total_train_mem_sgd_kb: float = 0.0    # param + grad + sgd_opt + act_cache
-    total_train_mem_adam_kb: float = 0.0   # param + grad + adam_opt + act_cache
+    total_train_mem_sgd_kb: float = 0.0  # param + grad + sgd_opt + act_cache
+    total_train_mem_adam_kb: float = 0.0  # param + grad + adam_opt + act_cache
 
 
 # ---------------------------------------------------------------------------
@@ -244,10 +244,16 @@ class LayerProfiler:
             return min(lst, key=key).idx if lst else stats[-1].idx
 
         return {
-            "min_client_compute": pick_min(candidates, key=lambda s: s.cumulative_flops),
+            "min_client_compute": pick_min(
+                candidates, key=lambda s: s.cumulative_flops
+            ),
             "min_transfer": pick_min(candidates, key=lambda s: s.transfer_kb),
-            "best_balance": pick_min(candidates, key=lambda s: abs(s.client_flop_pct - 50.0)),
-            "min_client_memory": pick_min(candidates, key=lambda s: s.cumulative_params),
+            "best_balance": pick_min(
+                candidates, key=lambda s: abs(s.client_flop_pct - 50.0)
+            ),
+            "min_client_memory": pick_min(
+                candidates, key=lambda s: s.cumulative_params
+            ),
         }
 
     # ------------------------------------------------------------------
@@ -273,6 +279,7 @@ class LayerProfiler:
                         "activation_bytes": int(out_t.numel() * out_t.element_size()),
                         "cpu_time_us": 0.0,
                     }
+
             return hook
 
         handles = []
@@ -296,6 +303,7 @@ class LayerProfiler:
         def pre_hook(name: str):
             def hook(mod: nn.Module, inp):
                 pre_cpu[name] = time.perf_counter()
+
             return hook
 
         def post_hook(name: str):
@@ -303,6 +311,7 @@ class LayerProfiler:
                 elapsed = (time.perf_counter() - pre_cpu.get(name, 0)) * 1e6
                 if elapsed < cpu_best[name]:
                     cpu_best[name] = elapsed
+
             return hook
 
         handles = []
@@ -358,6 +367,7 @@ class LayerProfiler:
                 start = torch.cuda.Event(enable_timing=True)
                 start.record()
                 cuda_start[name] = start
+
             return hook
 
         def gpu_post(name: str):
@@ -365,6 +375,7 @@ class LayerProfiler:
                 end = torch.cuda.Event(enable_timing=True)
                 end.record()
                 cuda_end[name] = end
+
             return hook
 
         handles = []
@@ -399,6 +410,7 @@ class LayerProfiler:
     def _clone_model_to_gpu(self) -> nn.Module:
         """Return a GPU copy of self.model with identical weights."""
         import copy
+
         clone = copy.deepcopy(self.model).cuda().eval()
         return clone
 
@@ -455,7 +467,9 @@ class LayerProfiler:
             s.remaining_flops = total_flops - cum_flops
             s.remaining_params = total_params - cum_params
             s.transfer_kb = s.activation_bytes / 1024.0
-            s.client_flop_pct = (cum_flops / total_flops * 100.0) if total_flops else 0.0
+            s.client_flop_pct = (
+                (cum_flops / total_flops * 100.0) if total_flops else 0.0
+            )
             s.server_flop_pct = 100.0 - s.client_flop_pct
             s.balance_score = 1.0 - abs(s.client_flop_pct - 50.0) / 50.0
             s.memory_inference_kb = (s.param_bytes + s.activation_bytes) / 1024.0
@@ -503,19 +517,15 @@ class TrainingProfiler:
     def profile(self) -> list[TrainingLayerStats]:
         """Run backward timing and compute memory estimates."""
         bwd_cpu = self._collect_backward_timing_cpu()
-        bwd_gpu = (
-            self._collect_backward_timing_gpu()
-            if self._run_gpu
-            else {}
-        )
+        bwd_gpu = self._collect_backward_timing_gpu() if self._run_gpu else {}
 
         stats: list[TrainingLayerStats] = []
         for inf_s in self.inference_stats:
             name = inf_s.name
             param_kb = inf_s.param_bytes / 1024.0
-            grad_kb = param_kb                      # float32 grad = same as param
-            opt_sgd_kb = param_kb                   # SGD momentum: 1x params
-            opt_adam_kb = 2.0 * param_kb            # Adam m1 + m2: 2x params
+            grad_kb = param_kb  # float32 grad = same as param
+            opt_sgd_kb = param_kb  # SGD momentum: 1x params
+            opt_adam_kb = 2.0 * param_kb  # Adam m1 + m2: 2x params
             act_cache_kb = inf_s.activation_bytes / 1024.0
 
             stats.append(
@@ -565,12 +575,14 @@ class TrainingProfiler:
             def make_bwd_pre(n: str):
                 def h(mod, grad_output):
                     pre_t[n] = time.perf_counter()
+
                 return h
 
             def make_bwd_post(n: str):
                 def h(mod, grad_input, grad_output):
                     if n in pre_t:
                         post_t[n] = time.perf_counter()
+
                 return h
 
             handles = []
@@ -623,6 +635,7 @@ class TrainingProfiler:
                     ev = torch.cuda.Event(enable_timing=True)
                     ev.record()
                     cuda_pre[n] = ev
+
                 return h
 
             def make_gpu_post(n: str):
@@ -630,6 +643,7 @@ class TrainingProfiler:
                     ev = torch.cuda.Event(enable_timing=True)
                     ev.record()
                     cuda_post[n] = ev
+
                 return h
 
             handles = []
@@ -684,7 +698,9 @@ class TrainingProfiler:
             s.total_opt_adam_kb = cum_opt_adam
             s.total_act_cache_kb = cum_act
             s.total_train_mem_sgd_kb = (
-                cum_param + cum_grad + (cum_param)  # SGD momentum = 1x
+                cum_param
+                + cum_grad
+                + (cum_param)  # SGD momentum = 1x
                 + cum_act
             )
             s.total_train_mem_adam_kb = cum_param + cum_grad + cum_opt_adam + cum_act
@@ -699,18 +715,18 @@ def _fmt(n: int | float, width: int = 8) -> str:
     """Format a number with K/M/G suffix."""
     if isinstance(n, float):
         if abs(n) >= 1_000_000_000:
-            return f"{n/1e9:{width}.2f}G"
+            return f"{n / 1e9:{width}.2f}G"
         if abs(n) >= 1_000_000:
-            return f"{n/1e6:{width}.2f}M"
+            return f"{n / 1e6:{width}.2f}M"
         if abs(n) >= 1_000:
-            return f"{n/1e3:{width}.1f}K"
+            return f"{n / 1e3:{width}.1f}K"
         return f"{n:{width}.1f}"
     if n >= 1_000_000_000:
-        return f"{n/1e9:{width}.2f}G"
+        return f"{n / 1e9:{width}.2f}G"
     if n >= 1_000_000:
-        return f"{n/1e6:{width}.2f}M"
+        return f"{n / 1e6:{width}.2f}M"
     if n >= 1_000:
-        return f"{n/1e3:{width}.1f}K"
+        return f"{n / 1e3:{width}.1f}K"
     return f"{n:{width}d}"
 
 
@@ -733,7 +749,9 @@ def print_run_header(
     print("  Split-Learning Layer Profiler")
     print(sep)
     print(f"  Model:       {model_name}")
-    print(f"  Input:       shape={_ss(tuple(sample.shape))}  dtype={dtype_name}  batch={batch}")
+    print(
+        f"  Input:       shape={_ss(tuple(sample.shape))}  dtype={dtype_name}  batch={batch}"
+    )
     print(f"  Run device:  {profiler.device}")
     print(
         f"  CPU timing:  {profiler.n_warmup} warmup + {profiler.n_reps} reps"
@@ -745,10 +763,14 @@ def print_run_header(
             f"  device=cuda:0  {profiler.gpu_device_name}"
         )
     else:
-        reason = "skipped (--no-gpu-timing)" if profiler.skip_gpu else "CUDA not available"
+        reason = (
+            "skipped (--no-gpu-timing)" if profiler.skip_gpu else "CUDA not available"
+        )
         print(f"  GPU timing:  {reason}")
     if training:
-        print("  Training:    backward-pass profiling + memory estimates  (SGD and Adam)")
+        print(
+            "  Training:    backward-pass profiling + memory estimates  (SGD and Adam)"
+        )
     print(sep)
 
 
@@ -762,7 +784,11 @@ def print_layer_table(
     W = 120 if gpu_available else 108
     sep = "─" * W
     print(f"\n{sep}")
-    label = "inference only" if not gpu_available else "inference  (cpu_us and gpu_us = minimum over reps)"
+    label = (
+        "inference only"
+        if not gpu_available
+        else "inference  (cpu_us and gpu_us = minimum over reps)"
+    )
     print(f"  Layer Statistics  [{label}]")
     print(sep)
     gpu_col = f" {'gpu_us':>8}" if gpu_available else ""
@@ -783,10 +809,7 @@ def print_layer_table(
     print(sep)
     total_p = sum(s.n_params for s in stats)
     total_f = sum(s.flops for s in stats)
-    print(
-        f"  {'TOTAL':<55}"
-        f" {_fmt(total_p):>8} {_fmt(total_f):>9}"
-    )
+    print(f"  {'TOTAL':<55} {_fmt(total_p):>8} {_fmt(total_f):>9}")
     note = "  NOTE: FLOPs counts linear/conv only; elementwise ops (ReLU/Pool) = 0."
     print(note)
     print(sep)
@@ -802,7 +825,9 @@ def print_cutpoint_table(
     print(f"\n{sep}")
     print("  Cut-Point Analysis  [client = layers 0..cut  |  server = rest]")
     print(sep)
-    gpu_cols = f" {'cpu_us*':>9} {'gpu_us*':>9}" if gpu_available else f" {'cpu_us*':>9}"
+    gpu_cols = (
+        f" {'cpu_us*':>9} {'gpu_us*':>9}" if gpu_available else f" {'cpu_us*':>9}"
+    )
     hdr = (
         f"  {'cut':>3}  {'after':<18} {'client_FLOPs':>13} {'server_FLOPs':>13}"
         f" {'client%':>8} {'xfer_KB':>9} {'balance':>8}{gpu_cols}"

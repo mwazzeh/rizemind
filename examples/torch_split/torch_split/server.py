@@ -251,7 +251,9 @@ def server_fn(context: Context):
     round_losses: list[float] = []
 
     # Load server-side evaluation data once.
-    eval_loader = make_server_eval_loader(batch_size, spec, max_samples=eval_max_samples)
+    eval_loader = make_server_eval_loader(
+        batch_size, spec, max_samples=eval_max_samples
+    )
     eval_criterion = nn.CrossEntropyLoss()
 
     if results_path:
@@ -340,7 +342,9 @@ def server_fn(context: Context):
     # on_evaluate_config_fn additionally ships tail weights so clients can
     # report validation accuracy on their local held-out partition.
     base_strategy = HeadShapeAwareFedAvg(
-        should_evaluate=lambda parameters: _parameters_match_model(parameters, eval_head),
+        should_evaluate=lambda parameters: _parameters_match_model(
+            parameters, eval_head
+        ),
         should_evaluate_round=should_evaluate_round,
         fraction_fit=1.0,
         fraction_evaluate=1.0,

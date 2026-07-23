@@ -38,7 +38,9 @@ def simple_stats(simple_model, simple_input):
 
 @pytest.fixture
 def simple_profiler(simple_model, simple_input):
-    return LayerProfiler(simple_model, simple_input, n_warmup=2, n_reps=5, skip_gpu=True)
+    return LayerProfiler(
+        simple_model, simple_input, n_warmup=2, n_reps=5, skip_gpu=True
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -47,7 +49,9 @@ def simple_profiler(simple_model, simple_input):
 
 
 def test_layer_count_matches_leaf_modules(simple_model, simple_stats):
-    leaf_count = sum(1 for _, m in simple_model.named_modules() if not list(m.children()))
+    leaf_count = sum(
+        1 for _, m in simple_model.named_modules() if not list(m.children())
+    )
     assert len(simple_stats) == leaf_count
 
 
@@ -77,8 +81,8 @@ def test_relu_preserves_shape(simple_stats):
 
 def test_linear_param_count(simple_stats):
     linears = [s for s in simple_stats if s.layer_type == "Linear"]
-    assert linears[0].n_params == 136   # 16*8 + 8
-    assert linears[1].n_params == 36    # 8*4 + 4
+    assert linears[0].n_params == 136  # 16*8 + 8
+    assert linears[1].n_params == 36  # 8*4 + 4
 
 
 def test_relu_has_no_params(simple_stats):
@@ -169,7 +173,12 @@ def test_recommendations_keys(simple_model, simple_input):
     p = LayerProfiler(simple_model, simple_input, n_warmup=1, n_reps=2, skip_gpu=True)
     stats = p.profile()
     recs = p.recommendations(stats)
-    assert {"min_client_compute", "min_transfer", "best_balance", "min_client_memory"} == set(recs.keys())
+    assert {
+        "min_client_compute",
+        "min_transfer",
+        "best_balance",
+        "min_client_memory",
+    } == set(recs.keys())
 
 
 def test_recommendations_valid_indices(simple_model, simple_input):

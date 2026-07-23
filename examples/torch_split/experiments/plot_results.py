@@ -24,8 +24,14 @@ PLOTS_DIR = HERE / "plots"
 
 # Consistent colors per run id across all figures.
 _PALETTE = [
-    "#4e79a7", "#f28e2b", "#e15759", "#76b7b2",
-    "#59a14f", "#edc948", "#b07aa1", "#ff9da7",
+    "#4e79a7",
+    "#f28e2b",
+    "#e15759",
+    "#76b7b2",
+    "#59a14f",
+    "#edc948",
+    "#b07aa1",
+    "#ff9da7",
 ]
 
 
@@ -65,8 +71,13 @@ def _plot_group(
             continue
         xs, ys = _series(records, metric)
         ax.plot(
-            xs, ys, marker="o", markersize=3, linewidth=1.6,
-            color=_PALETTE[i % len(_PALETTE)], label=_label_for(manifest, rid),
+            xs,
+            ys,
+            marker="o",
+            markersize=3,
+            linewidth=1.6,
+            color=_PALETTE[i % len(_PALETTE)],
+            label=_label_for(manifest, rid),
         )
         drawn = True
 
@@ -105,8 +116,13 @@ def _plot_final_accuracy_bar(manifest: dict, out_path: Path) -> None:
     ax.set_title("Final accuracy by configuration", fontweight="bold")
     ax.grid(axis="x", alpha=0.3)
     for bar, acc in zip(bars, accs):
-        ax.text(acc + 0.01, bar.get_y() + bar.get_height() / 2,
-                f"{acc:.3f}", va="center", fontsize=8)
+        ax.text(
+            acc + 0.01,
+            bar.get_y() + bar.get_height() / 2,
+            f"{acc:.3f}",
+            va="center",
+            fontsize=8,
+        )
     handles = [
         plt.Rectangle((0, 0), 1, 1, fc="#4e79a7", label="MNIST (MLP)"),
         plt.Rectangle((0, 0), 1, 1, fc="#f28e2b", label="CIFAR-10 (CNN)"),
@@ -120,20 +136,33 @@ def _plot_final_accuracy_bar(manifest: dict, out_path: Path) -> None:
 
 # Comparison groups: (filename stem, title, run ids)
 _COMPARISONS = [
-    ("cross_dataset_iid", "MNIST vs CIFAR-10 (IID baseline)",
-     ["mnist_iid", "cifar_iid"]),
-    ("mnist_partitioning", "MNIST — effect of data heterogeneity",
-     ["mnist_iid", "mnist_dir_a0.5", "mnist_dir_a0.1"]),
-    ("cifar_partitioning", "CIFAR-10 — effect of data heterogeneity",
-     ["cifar_iid", "cifar_dir_a0.5", "cifar_dir_a0.1"]),
-    ("mnist_clients", "MNIST — effect of client count",
-     ["mnist_iid", "mnist_iid_5cl"]),
-    ("cifar_clients", "CIFAR-10 — effect of client count",
-     ["cifar_iid", "cifar_iid_5cl"]),
-    ("mnist_lr", "MNIST — effect of learning rate",
-     ["mnist_iid", "mnist_iid_lr0.05"]),
-    ("cifar_lr", "CIFAR-10 — effect of learning rate",
-     ["cifar_iid", "cifar_iid_lr0.05"]),
+    (
+        "cross_dataset_iid",
+        "MNIST vs CIFAR-10 (IID baseline)",
+        ["mnist_iid", "cifar_iid"],
+    ),
+    (
+        "mnist_partitioning",
+        "MNIST — effect of data heterogeneity",
+        ["mnist_iid", "mnist_dir_a0.5", "mnist_dir_a0.1"],
+    ),
+    (
+        "cifar_partitioning",
+        "CIFAR-10 — effect of data heterogeneity",
+        ["cifar_iid", "cifar_dir_a0.5", "cifar_dir_a0.1"],
+    ),
+    ("mnist_clients", "MNIST — effect of client count", ["mnist_iid", "mnist_iid_5cl"]),
+    (
+        "cifar_clients",
+        "CIFAR-10 — effect of client count",
+        ["cifar_iid", "cifar_iid_5cl"],
+    ),
+    ("mnist_lr", "MNIST — effect of learning rate", ["mnist_iid", "mnist_iid_lr0.05"]),
+    (
+        "cifar_lr",
+        "CIFAR-10 — effect of learning rate",
+        ["cifar_iid", "cifar_iid_lr0.05"],
+    ),
 ]
 
 
@@ -146,10 +175,22 @@ def main() -> None:
 
     print("Generating comparison plots...")
     for stem, title, ids in _COMPARISONS:
-        _plot_group(manifest, ids, "val_accuracy", "Validation accuracy",
-                    f"{title}\n(validation accuracy)", PLOTS_DIR / f"{stem}_acc.png")
-        _plot_group(manifest, ids, "val_loss", "Validation loss",
-                    f"{title}\n(validation loss)", PLOTS_DIR / f"{stem}_loss.png")
+        _plot_group(
+            manifest,
+            ids,
+            "val_accuracy",
+            "Validation accuracy",
+            f"{title}\n(validation accuracy)",
+            PLOTS_DIR / f"{stem}_acc.png",
+        )
+        _plot_group(
+            manifest,
+            ids,
+            "val_loss",
+            "Validation loss",
+            f"{title}\n(validation loss)",
+            PLOTS_DIR / f"{stem}_loss.png",
+        )
 
     print("Generating summary bar chart...")
     _plot_final_accuracy_bar(manifest, PLOTS_DIR / "final_accuracy_summary.png")

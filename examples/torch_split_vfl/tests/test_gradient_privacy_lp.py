@@ -43,21 +43,35 @@ def _make_holder(privacy: GradientPrivacyConfig, *, attack=False, seed=42):
     ctx = SimpleNamespace(state={})
     torch.manual_seed(0)
     bottom = BottomMLP(in_features=4, hidden_dim=HIDDEN)
-    train_part = VerticalPartition(features=torch.arange(40.0).view(10, 4), batch_size=BATCH)
+    train_part = VerticalPartition(
+        features=torch.arange(40.0).view(10, 4), batch_size=BATCH
+    )
     top = ServerTopMLP(num_clients=K, hidden_dim=HIDDEN, num_classes=2)
     lh = LabelHolderContext(
-        top_model=top, top_lr=0.1, num_classes=2,
-        label_train=VerticalPartition(features=torch.randint(0, 2, (64,)), batch_size=BATCH),
+        top_model=top,
+        top_lr=0.1,
+        num_classes=2,
+        label_train=VerticalPartition(
+            features=torch.randint(0, 2, (64,)), batch_size=BATCH
+        ),
         test_labels=torch.randint(0, 2, (12,)),
-        privacy=privacy, seed=seed, train_batch_size=BATCH, attack_enabled=attack,
+        privacy=privacy,
+        seed=seed,
+        train_batch_size=BATCH,
+        attack_enabled=attack,
     )
     client = VerticalSplitClient(0, bottom, train_part, 0.1, ctx, label_holder=lh)
     return client, ctx, top
 
 
 def _cfg(do_eval=False):
-    return {LP_PHASE_KEY: "compute", "sl_step": 0, "widths": "4,4", "pids": "0,1",
-            "do_eval": do_eval}
+    return {
+        LP_PHASE_KEY: "compute",
+        "sl_step": 0,
+        "widths": "4,4",
+        "pids": "0,1",
+        "do_eval": do_eval,
+    }
 
 
 def test_protected_gradients_differ_from_clean():
@@ -94,7 +108,9 @@ def test_clip_mode_bounds_released_rows():
 def test_released_gradients_match_mechanism_output():
     """The strategy serializes exactly the protected gradient (no clean copy)."""
     joint = np.random.RandomState(2).randn(BATCH, K * HIDDEN).astype(np.float32)
-    privacy = GradientPrivacyConfig(mode="gaussian", clip_norm=1e-3, noise_multiplier=1.0)
+    privacy = GradientPrivacyConfig(
+        mode="gaussian", clip_norm=1e-3, noise_multiplier=1.0
+    )
     client, _, _ = _make_holder(privacy)
     grads, _, _ = client._lp_compute([joint], _cfg())
     released = np.concatenate(grads, axis=1)
@@ -112,42 +128,71 @@ def test_no_clean_gradient_in_strategy_state_protected():
     labels = np.array([0, 1] * (BATCH // 2), dtype=np.int64)
 
     class FakeProxy:
-        def __init__(self, cid): self.cid = cid
+        def __init__(self, cid):
+            self.cid = cid
 
     class FakeCM:
-        def __init__(self, p): self._p = p
-        def sample(self, n, min_num_clients=None): return list(self._p.values())[:n]
-        def all(self): return dict(self._p)
+        def __init__(self, p):
+            self._p = p
+
+        def sample(self, n, min_num_clients=None):
+            return list(self._p.values())[:n]
+
+        def all(self):
+            return dict(self._p)
 
     proxies = {f"cid{p}": FakeProxy(f"cid{p}") for p in range(K)}
     cm = FakeCM(proxies)
     telem = RunTelemetry()
     strat = LabelPrivateVerticalStrategy(
-        SplitLearningConfig(cut_layer=0), num_clients=K, label_holder_pid=0,
+        SplitLearningConfig(cut_layer=0),
+        num_clients=K,
+        label_holder_pid=0,
         telemetry=telem,
     )
 
     def _ok(params, metrics):
-        return FitRes(status=Status(Code.OK, ""), parameters=params,
-                      num_examples=BATCH, metrics=metrics)
+        return FitRes(
+            status=Status(Code.OK, ""),
+            parameters=params,
+            num_examples=BATCH,
+            metrics=metrics,
+        )
 
     # COLLECT
     strat.configure_fit(1, None, cm)
-    acts = [_ok(ndarrays_to_parameters([np.full((BATCH, HIDDEN), p + 1.0, np.float32)]),
-                {"partition_id": p}) for p in range(K)]
+    acts = [
+        _ok(
+            ndarrays_to_parameters([np.full((BATCH, HIDDEN), p + 1.0, np.float32)]),
+            {"partition_id": p},
+        )
+        for p in range(K)
+    ]
     strat.aggregate_fit(1, [(proxies[f"cid{p}"], acts[p]) for p in range(K)], [])
     # COMPUTE: holder returns protected gradients + privacy diagnostics.
     strat.configure_fit(2, None, cm)
     clean = np.random.RandomState(0).randn(BATCH, K * HIDDEN).astype(np.float32) * 5
     protected, diag = privatize_joint_gradient(
-        clean, GradientPrivacyConfig(mode="gaussian", clip_norm=0.1, noise_multiplier=1.0),
+        clean,
+        GradientPrivacyConfig(mode="gaussian", clip_norm=0.1, noise_multiplier=1.0),
         research_seed=1,
     )
-    rel_grads = [np.ascontiguousarray(protected[:, p * HIDDEN:(p + 1) * HIDDEN])
-                 for p in range(K)]
+    rel_grads = [
+        np.ascontiguousarray(protected[:, p * HIDDEN : (p + 1) * HIDDEN])
+        for p in range(K)
+    ]
     metrics = {"train_loss": 0.5}
-    metrics.update({f"gp_{k}": (v if not isinstance(v, (int, float)) or isinstance(v, bool)
-                                else float(v)) for k, v in diag.items() if v is not None})
+    metrics.update(
+        {
+            f"gp_{k}": (
+                v
+                if not isinstance(v, (int, float)) or isinstance(v, bool)
+                else float(v)
+            )
+            for k, v in diag.items()
+            if v is not None
+        }
+    )
     metrics["lp_privacy_time_s"] = 0.001
     compute_res = _ok(ndarrays_to_parameters(rel_grads), metrics)
     strat.aggregate_fit(2, [(proxies["cid0"], compute_res)], [])

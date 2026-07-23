@@ -4,7 +4,8 @@ import numpy as np
 import pytest
 import torch
 import torch.nn as nn
-
+from rizemind.split_learning.serialization import tensor_to_parameters
+from rizemind.split_learning.telemetry import RunTelemetry
 from torch_split_vfl.server import make_on_train_step
 from torch_split_vfl.task import (
     build_bottom_model,
@@ -17,8 +18,6 @@ from torch_split_vfl.task import (
     party_feature_dim,
     resolve_active_groups,
 )
-from rizemind.split_learning.serialization import tensor_to_parameters
-from rizemind.split_learning.telemetry import RunTelemetry
 
 
 # --------------------------------------------------------------------------
@@ -138,8 +137,12 @@ def test_sample_alignment_same_seed():
 
 def test_different_seed_changes_order():
     spec = _adult()
-    a = make_server_train_labels(spec, 16, 500, shuffle_seed=1)._permutation_for_epoch(0)
-    b = make_server_train_labels(spec, 16, 500, shuffle_seed=2)._permutation_for_epoch(0)
+    a = make_server_train_labels(spec, 16, 500, shuffle_seed=1)._permutation_for_epoch(
+        0
+    )
+    b = make_server_train_labels(spec, 16, 500, shuffle_seed=2)._permutation_for_epoch(
+        0
+    )
     assert not torch.equal(a, b)
 
 
@@ -171,7 +174,9 @@ def test_on_train_step_records_telemetry():
     )
     # Two fake activations (B=4, H=8), tagged pid 0 and 1.
     acts = [torch.randn(4, 8, requires_grad=True) for _ in range(2)]
-    ordered = [(i, f"cid{i}", tensor_to_parameters(a.detach())) for i, a in enumerate(acts)]
+    ordered = [
+        (i, f"cid{i}", tensor_to_parameters(a.detach())) for i, a in enumerate(acts)
+    ]
     grad_store, loss = on_step(0, ordered)
     assert set(grad_store) == {"cid0", "cid1"}
     d = telem.as_dict()
@@ -188,7 +193,8 @@ def test_metrics_serializable_json():
     from rizemind.split_learning.metrics import classification_metrics
 
     m = classification_metrics(
-        np.array([0, 1, 1, 0]), np.array([0, 1, 0, 0]),
+        np.array([0, 1, 1, 0]),
+        np.array([0, 1, 0, 0]),
         y_score=np.array([0.2, 0.9, 0.4, 0.1]),
     )
     json.dumps(m)  # must not raise

@@ -241,19 +241,34 @@ def plot_analysis(
             ax.text(
                 bar.get_x() + bar.get_width() / 2,
                 bar.get_height() * 1.05,
-                f"{val/1e6:.1f}M" if val >= 1e6 else f"{val/1e3:.0f}K" if val >= 1e3 else str(val),
-                ha="center", va="bottom", fontsize=6,
+                f"{val / 1e6:.1f}M"
+                if val >= 1e6
+                else f"{val / 1e3:.0f}K"
+                if val >= 1e3
+                else str(val),
+                ha="center",
+                va="bottom",
+                fontsize=6,
             )
 
     # ── (0,1) Activation transfer size ────────────────────────────────────
     ax = axes[0, 1]
     transfer_vals = [s.transfer_kb for s in stats]
-    ax.bar(xs, transfer_vals, color=bar_colors, edgecolor="white", linewidth=0.4, alpha=0.85)
+    ax.bar(
+        xs,
+        transfer_vals,
+        color=bar_colors,
+        edgecolor="white",
+        linewidth=0.4,
+        alpha=0.85,
+    )
     ax.set_title("Activation transfer size at each cut point", fontweight="bold")
     ax.set_xticks(xs)
     ax.set_xticklabels(
         [f"cut@{i}\n{s.name}" for i, s in enumerate(stats)],
-        rotation=40, ha="right", fontsize=7,
+        rotation=40,
+        ha="right",
+        fontsize=7,
     )
     ax.set_ylabel("Transfer size (KB)")
     ax.grid(axis="y", alpha=0.3)
@@ -262,7 +277,9 @@ def plot_analysis(
         "min",
         xy=(min_t_idx, transfer_vals[min_t_idx]),
         xytext=(min_t_idx, transfer_vals[min_t_idx] + max(transfer_vals) * 0.1),
-        ha="center", fontsize=8, color="red",
+        ha="center",
+        fontsize=8,
+        color="red",
         arrowprops={"arrowstyle": "->", "color": "red"},
     )
 
@@ -272,9 +289,12 @@ def plot_analysis(
     client_pcts = [s.cumulative_flops / total_flops * 100 for s in stats]
     server_pcts = [s.remaining_flops / total_flops * 100 for s in stats]
     ax.stackplot(
-        xs, client_pcts, server_pcts,
+        xs,
+        client_pcts,
+        server_pcts,
         labels=["Client FLOPs %", "Server FLOPs %"],
-        colors=["#4e79a7", "#f28e2b"], alpha=0.75,
+        colors=["#4e79a7", "#f28e2b"],
+        alpha=0.75,
     )
     balance_scores = [s.balance_score for s in stats]
     best_b = max(range(len(balance_scores[:-1])), key=lambda i: balance_scores[i])
@@ -294,13 +314,23 @@ def plot_analysis(
     width = 0.4 if gpu_available else 0.7
     ax.bar(
         [x - width / 2 for x in xs] if gpu_available else xs,
-        cpu_vals, width=width, color="#4e79a7", label="CPU", edgecolor="white", linewidth=0.4,
+        cpu_vals,
+        width=width,
+        color="#4e79a7",
+        label="CPU",
+        edgecolor="white",
+        linewidth=0.4,
     )
     if gpu_available:
         gpu_vals = [s.gpu_time_us for s in stats]
         ax.bar(
             [x + width / 2 for x in xs],
-            gpu_vals, width=width, color="#f28e2b", label="GPU (cuda:0)", edgecolor="white", linewidth=0.4,
+            gpu_vals,
+            width=width,
+            color="#f28e2b",
+            label="GPU (cuda:0)",
+            edgecolor="white",
+            linewidth=0.4,
         )
         ax.legend(fontsize=8)
     ax.set_title("Forward execution time per layer (min over reps)", fontweight="bold")
@@ -321,21 +351,46 @@ def plot_analysis(
         ax.plot(cut_xs, adam_vals, "s--", color="#e15759", label="Adam")
         ax.set_title("Training memory estimate (client side)", fontweight="bold")
         ax.set_xticks(cut_xs)
-        ax.set_xticklabels([f"cut@{s.idx}\n{s.name}" for s in cuts], rotation=40, ha="right", fontsize=7)
+        ax.set_xticklabels(
+            [f"cut@{s.idx}\n{s.name}" for s in cuts],
+            rotation=40,
+            ha="right",
+            fontsize=7,
+        )
         ax.set_ylabel("Memory (MB)")
         ax.legend(fontsize=8)
         ax.grid(alpha=0.3)
 
         ax = axes[2, 1]
         bwd_cpu_vals = [s.cumulative_bwd_cpu_us for s in cuts]
-        ax.bar(cut_xs, bwd_cpu_vals, color="#76b7b2", label="CPU backward (cumul.)", edgecolor="white", linewidth=0.4)
+        ax.bar(
+            cut_xs,
+            bwd_cpu_vals,
+            color="#76b7b2",
+            label="CPU backward (cumul.)",
+            edgecolor="white",
+            linewidth=0.4,
+        )
         if gpu_available:
             bwd_gpu_vals = [s.cumulative_bwd_gpu_us for s in cuts]
-            ax.bar(cut_xs, bwd_gpu_vals, color="#f28e2b", alpha=0.6, label="GPU backward (cumul.)", edgecolor="white", linewidth=0.4)
+            ax.bar(
+                cut_xs,
+                bwd_gpu_vals,
+                color="#f28e2b",
+                alpha=0.6,
+                label="GPU backward (cumul.)",
+                edgecolor="white",
+                linewidth=0.4,
+            )
             ax.legend(fontsize=8)
         ax.set_title("Backward pass time through client layers", fontweight="bold")
         ax.set_xticks(cut_xs)
-        ax.set_xticklabels([f"cut@{s.idx}\n{s.name}" for s in cuts], rotation=40, ha="right", fontsize=7)
+        ax.set_xticklabels(
+            [f"cut@{s.idx}\n{s.name}" for s in cuts],
+            rotation=40,
+            ha="right",
+            fontsize=7,
+        )
         ax.set_ylabel("Time (μs, cumulative)")
         ax.grid(axis="y", alpha=0.3)
 
@@ -346,9 +401,12 @@ def plot_analysis(
         for t in seen_types
     ]
     fig.legend(
-        handles=patches, title="Layer type",
-        loc="lower center", ncol=min(len(seen_types), 7),
-        fontsize=8, bbox_to_anchor=(0.5, -0.02),
+        handles=patches,
+        title="Layer type",
+        loc="lower center",
+        ncol=min(len(seen_types), 7),
+        fontsize=8,
+        bbox_to_anchor=(0.5, -0.02),
     )
 
     plt.tight_layout(rect=[0, 0.04, 1, 1])
@@ -374,40 +432,55 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     p.add_argument(
-        "--model", choices=list(_MODELS.keys()), default="mlp",
+        "--model",
+        choices=list(_MODELS.keys()),
+        default="mlp",
         help="Model to analyse (default: mlp).",
     )
     p.add_argument("--batch-size", type=int, default=32, metavar="N")
     p.add_argument(
-        "--dtype", choices=list(_DTYPE_MAP.keys()), default="float32",
+        "--dtype",
+        choices=list(_DTYPE_MAP.keys()),
+        default="float32",
         help="Input and model dtype (default: float32).",
     )
     p.add_argument(
-        "--device", default="cpu",
+        "--device",
+        default="cpu",
         help='Primary profiling device: "cpu", "cuda", "cuda:0", etc. (default: cpu).',
     )
     p.add_argument(
-        "--n-warmup", type=int, default=10, metavar="N",
+        "--n-warmup",
+        type=int,
+        default=10,
+        metavar="N",
         help="Forward passes before timing begins (default: 10).",
     )
     p.add_argument(
-        "--n-reps", type=int, default=30, metavar="N",
+        "--n-reps",
+        type=int,
+        default=30,
+        metavar="N",
         help="Timed forward passes; minimum is reported (default: 30).",
     )
     p.add_argument(
-        "--training", action="store_true",
+        "--training",
+        action="store_true",
         help="Add backward-pass profiling and training memory estimates.",
     )
     p.add_argument(
-        "--no-gpu-timing", action="store_true",
+        "--no-gpu-timing",
+        action="store_true",
         help="Skip GPU timing even if CUDA is available.",
     )
     p.add_argument(
-        "--output", default="split_analysis.png",
+        "--output",
+        default="split_analysis.png",
         help="Output PNG path (default: split_analysis.png).",
     )
     p.add_argument(
-        "--no-plot", action="store_true",
+        "--no-plot",
+        action="store_true",
         help="Skip plot generation; print tables only.",
     )
     return p.parse_args()
@@ -466,8 +539,7 @@ def main() -> None:
     if not args.no_plot:
         run_info = (
             f"input={_shape_str(tuple(sample.shape))}  dtype={args.dtype}"
-            f"  device={args.device}"
-            + ("  +GPU(cuda:0)" if gpu_ok else "")
+            f"  device={args.device}" + ("  +GPU(cuda:0)" if gpu_ok else "")
         )
         plot_analysis(stats, train_stats, model_name, run_info, args.output, gpu_ok)
 

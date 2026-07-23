@@ -162,11 +162,25 @@ _DATASETS: dict[str, DatasetSpec] = {
             ),
             party_columns=(
                 # Party 0 — demographic / person.
-                ("age", "sex", "race", "marital.status", "relationship",
-                 "native.country"),
+                (
+                    "age",
+                    "sex",
+                    "race",
+                    "marital.status",
+                    "relationship",
+                    "native.country",
+                ),
                 # Party 1 — work / education / financial.
-                ("workclass", "education", "education.num", "occupation",
-                 "hours.per.week", "capital.gain", "capital.loss", "fnlwgt"),
+                (
+                    "workclass",
+                    "education",
+                    "education.num",
+                    "occupation",
+                    "hours.per.week",
+                    "capital.gain",
+                    "capital.loss",
+                    "fnlwgt",
+                ),
             ),
         ),
     ),
@@ -354,8 +368,7 @@ def validate_tabular_spec(tspec: TabularSpec) -> None:
                 )
             if col not in known:
                 raise ValueError(
-                    f"party {pid} column {col!r} is neither numerical nor "
-                    "categorical"
+                    f"party {pid} column {col!r} is neither numerical nor categorical"
                 )
             if col in seen:
                 raise ValueError(f"column {col!r} is assigned to multiple parties")
@@ -441,7 +454,9 @@ def preprocess_tabular(
 
     def encode_labels(table: Table) -> torch.Tensor:
         pos = tspec.positive_label
-        ys = [1 if _clean(v).rstrip(".") == pos else 0 for v in table[tspec.label_column]]
+        ys = [
+            1 if _clean(v).rstrip(".") == pos else 0 for v in table[tspec.label_column]
+        ]
         return torch.tensor(ys, dtype=torch.long)
 
     party_train = [build_party(train_table, cols) for cols in tspec.party_columns]

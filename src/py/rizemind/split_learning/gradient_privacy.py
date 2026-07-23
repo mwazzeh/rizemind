@@ -130,7 +130,9 @@ class GradientPrivacyConfig:
         }
 
 
-def make_rng(config: GradientPrivacyConfig, *, research_seed: int | None) -> np.random.Generator:
+def make_rng(
+    config: GradientPrivacyConfig, *, research_seed: int | None
+) -> np.random.Generator:
     """Build the noise RNG for a release.
 
     Research-seeded mode returns a deterministic generator from ``research_seed``

@@ -170,15 +170,21 @@ def test_validate_rejects_label_in_party():
 
 def test_validate_rejects_duplicate_and_unknown_columns():
     dup = TabularSpec(
-        hf_path="x", label_column="y", positive_label="yes",
-        numerical=("age",), categorical=("sex",),
+        hf_path="x",
+        label_column="y",
+        positive_label="yes",
+        numerical=("age",),
+        categorical=("sex",),
         party_columns=(("age",), ("age",)),  # age assigned twice
     )
     with pytest.raises(ValueError):
         validate_tabular_spec(dup)
     unknown = TabularSpec(
-        hf_path="x", label_column="y", positive_label="yes",
-        numerical=("age",), categorical=("sex",),
+        hf_path="x",
+        label_column="y",
+        positive_label="yes",
+        numerical=("age",),
+        categorical=("sex",),
         party_columns=(("age", "ghost"), ("sex",)),  # 'ghost' not declared
     )
     with pytest.raises(ValueError):

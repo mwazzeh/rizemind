@@ -95,7 +95,7 @@ class SplitFlowerClient(NumPyClient):
         demo: bool = False,
     ) -> None:
         self.head = head
-        self.tail = tail          # held for local evaluate(); weights from server
+        self.tail = tail  # held for local evaluate(); weights from server
         self.train_partition = train_partition
         self.valloader = valloader
         # No momentum: a fresh client (and optimizer) is built each round and
@@ -120,7 +120,14 @@ class SplitFlowerClient(NumPyClient):
 
     def _demo_log(self, phase: str, msg: str) -> None:
         if self._demo:
-            log(INFO, "%s CLIENT node-%-4s  %s | %s", _DEMO_TAG, self._node_short, phase, msg)
+            log(
+                INFO,
+                "%s CLIENT node-%-4s  %s | %s",
+                _DEMO_TAG,
+                self._node_short,
+                phase,
+                msg,
+            )
 
     # ------------------------------------------------------------------
     # Data access
@@ -163,7 +170,9 @@ class SplitFlowerClient(NumPyClient):
         # Persist batch for the backward round (client instance is recreated).
         self._ctx.state[_SL_INPUT_KEY] = ArrayRecord(numpy_ndarrays=[x.numpy()])
         self._ctx.state[_SL_LABELS_KEY] = ArrayRecord(numpy_ndarrays=[y.numpy()])
-        self._ctx.state[_SL_HEAD_KEY] = ArrayRecord(numpy_ndarrays=get_weights(self.head))
+        self._ctx.state[_SL_HEAD_KEY] = ArrayRecord(
+            numpy_ndarrays=get_weights(self.head)
+        )
 
         self.optimizer.zero_grad()
         activation = self.head(x)
@@ -175,10 +184,14 @@ class SplitFlowerClient(NumPyClient):
         )
         self._demo_log("FORWARD ", "activation + labels sent to server")
 
-        return [activation.detach().numpy(), y.numpy()], x.shape[0], {
-            "epoch": float(self._epoch),
-            "batch_idx": float(self._batch_idx),
-        }
+        return (
+            [activation.detach().numpy(), y.numpy()],
+            x.shape[0],
+            {
+                "epoch": float(self._epoch),
+                "batch_idx": float(self._batch_idx),
+            },
+        )
 
     # ------------------------------------------------------------------
     # Backward round
@@ -212,10 +225,14 @@ class SplitFlowerClient(NumPyClient):
             "BACKWARD", f"gradient {_shape(grad)} applied, head updated + saved"
         )
 
-        return updated_weights, x.shape[0], {
-            "epoch": float(self._epoch),
-            "batch_idx": float(self._batch_idx),
-        }
+        return (
+            updated_weights,
+            x.shape[0],
+            {
+                "epoch": float(self._epoch),
+                "batch_idx": float(self._batch_idx),
+            },
+        )
 
     # ------------------------------------------------------------------
     # Evaluate
